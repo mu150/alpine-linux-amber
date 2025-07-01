@@ -1,13 +1,16 @@
-name: Build and Publish Alpine RG353VS Image
+name: Build, Artifact & Release Alpine RG353VS
 
 on:
   push:
     branches:
       - main
+    tags:
+      - 'v*'
   workflow_dispatch:
 
 jobs:
   build-and-push:
+    name: Build & Push Container
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -15,7 +18,7 @@ jobs:
       id-token: write
 
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
 
       - name: Setup QEMU emulation
@@ -23,17 +26,17 @@ jobs:
         with:
           platforms: arm64
 
-      - name: Setup Docker Buildx
+      - name: Setup Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Login to GitHub Container Registry
+      - name: Login to GHCR
         uses: docker/login-action@v2
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push multi‑arch image
+      - name: Build & Push
         id: build
         uses: docker/build-push-action@v4
         with:
@@ -45,11 +48,46 @@ jobs:
             ghcr.io/${{ github.repository_owner }}/alpine-rg353vs:latest
             ghcr.io/${{ github.repository_owner }}/alpine-rg353vs:${{ github.sha }}
 
-      - name: Save image digest
-        run: echo "${{ steps.build.outputs.digest }}" > image-digest.txt
+      - name: Save Image Tarball
+        run: |
+          IMAGE=ghcr.io/${{ github.repository_owner }}/alpine-rg353vs:${{ github.sha }}
+          docker pull $IMAGE
+          docker save $IMAGE | gzip > alpine-rg353vs-${{ github.sha }}.tar.gz
 
-      - name: Upload image digest artifact
+      - name: Upload Workflow Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: alpine-rg353vs-digest
-          path: image-digest.txt
+          name: alpine-rg353vs-image-${{ github.sha }}
+          path: alpine-rg353vs-${{ github.sha }}.tar.gz
+
+  package-release:
+    name: Create Release & Attach Asset
+    needs: build-and-push
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download Image Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: alpine-rg353vs-image-${{ github.sha }}
+          path: .
+
+      - name: Create GitHub Release
+        id: create_release
+        uses: ncipollo/release-action@v1
+        with:
+          tag: ${{ github.ref_name }}
+          name: Release ${{ github.ref_name }}
+          body: |
+            Container image and downloadable archive for RG353VS Alpine.
+          draft: false
+          prerelease: false
+
+      - name: Upload Release Asset
+        uses: actions/upload-release-asset@v4
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: alpine-rg353vs-${{ github.sha }}.tar.gz
+          asset_name: alpine-rg353vs-${{ github.ref_name }}.tar.gz
+          asset_content_type: application/gzip
