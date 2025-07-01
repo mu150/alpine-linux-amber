@@ -1,36 +1,21 @@
-# Dockerfile
-# -----------------------------------------------------------------------------
-# Alpine Linux base for RG353VS (Allwinner A55 / ARM64)
-# -----------------------------------------------------------------------------
-ARG ALPINE_VERSION=3.19
-FROM --platform=$TARGETPLATFORM alpine:${ALPINE_VERSION}
+# Dockerfile: builder for Alpine ARM64 SD‑card image
+FROM alpine:3.19 AS builder
 
-# set a default timezone (optional)
-ENV TZ=UTC
-
-# update & install common packages
-RUN apk update && \
-    apk upgrade && \
-    apk add --no-cache \
+# install build tools inside container
+RUN apk add --no-cache \
       bash \
-      ca-certificates \
-      sudo \
-      openssh \
+      apk-tools \
+      alpine-sdk \
       curl \
+      qemu-user-static \
       util-linux \
-      && rm -rf /var/cache/apk/*
+      parted \
+      e2fsprogs \
+      dosfstools \
+      squashfs-tools
 
-# create a default user (optional)
-ARG USER=player
-ARG UID=1000
-ARG GID=1000
-RUN addgroup -g ${GID} ${USER} \
-  && adduser -u ${UID} -G ${USER} -s /bin/bash -D ${USER} \
-  && echo "${USER} ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
+COPY build.sh /usr/local/bin/build.sh
+RUN chmod +x /usr/local/bin/build.sh
 
-# switch to non‑root by default
-USER ${USER}
-WORKDIR /home/${USER}
-
-# set a minimal entrypoint
-ENTRYPOINT ["/bin/sh"]
+# entrypoint runs the build script, which emits /out/rg353vs-alpine.img
+ENTRYPOINT ["/usr/local/bin/build.sh"]
