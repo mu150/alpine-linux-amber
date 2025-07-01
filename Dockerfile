@@ -1,5 +1,5 @@
 ARG ALPINE_VERSION=3.19
-FROM --platform=$TARGETPLATFORM alpine:${ALPINE_VERSION}
+FROM alpine:${ALPINE_VERSION}
 
 # set a default timezone (optional)
 ENV TZ=UTC
@@ -25,6 +25,6 @@ RUN addgroup -g ${GID} ${USER} \
   && echo "${USER} ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
 
 USER ${USER}
-WORKDIR /home/${USER]
+WORKDIR /home/${USER}
 
 ENTRYPOINT ["/bin/sh"]
