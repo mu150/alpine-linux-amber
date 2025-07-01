@@ -50,7 +50,7 @@ jobs:
         run: echo "${{ steps.build.outputs.digest }}" > image-digest.txt
 
       - name: Upload image digest artifact
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: alpine-rg353vs-digest
           path: image-digest.txt
