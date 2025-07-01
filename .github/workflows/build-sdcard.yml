@@ -1,33 +1,56 @@
-name: Build Alpine for RG353VS SD‑Card
+# .github/workflows/docker-image.yml
+name: Build and Publish Alpine RG353VS Image
 
 on:
   push:
-    branches: [ main ]
+    branches:
+      - main
   workflow_dispatch:
 
 jobs:
-  build:
+  build-and-push:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
 
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Enable QEMU emulation
+      - name: Setup QEMU
         uses: docker/setup-qemu-action@v3
         with:
           platforms: arm64
 
-      - name: Build Docker image + run builder
-        run: |
-          docker build -t alpine-rg353vs-builder .
-          mkdir -p out
-          docker run --rm \
-            -v "${{ github.workspace }}:/work" \
-            alpine-rg353vs-builder
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@v3
 
-      - name: Upload SD‑card image
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v2
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        id: build
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/arm64
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/alpine-rg353vs:latest
+            ghcr.io/${{ github.repository_owner }}/alpine-rg353vs:${{ github.sha }}
+
+      - name: Save image digest
+        run: echo "${{ steps.build.outputs.digest }}" > image-digest.txt
+
+      - name: Upload image digest artifact
         uses: actions/upload-artifact@v3
         with:
-          name: rg353vs-alpine-sdcard
-          path: out/rg353vs-alpine.img
+          name: alpine-rg353vs-digest
+          path: image-digest.txt
