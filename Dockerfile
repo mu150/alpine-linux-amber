@@ -4,12 +4,7 @@ FROM --platform=$TARGETPLATFORM alpine:${ALPINE_VERSION}
 # set a default timezone (optional)
 ENV TZ=UTC
 
-# enable the community repository
-RUN sed -i \
-    -e 's|/v'"${ALPINE_VERSION}"'/main|&\n/v'"${ALPINE_VERSION}"'/community|' \
-    /etc/apk/repositories
-
-# update + install build tools (including qemu-user-static)
+# update + install build tools (no qemu)
 RUN apk update && apk add --no-cache \
       bash \
       alpine-sdk \
@@ -21,7 +16,7 @@ RUN apk update && apk add --no-cache \
       squashfs-tools \
     && rm -rf /var/cache/apk/*
 
-# create a default non‑root user
+# create a non‑root user
 ARG USER=player
 ARG UID=1000
 ARG GID=1000
@@ -30,6 +25,6 @@ RUN addgroup -g ${GID} ${USER} \
   && echo "${USER} ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
 
 USER ${USER}
-WORKDIR /home/${USER}
+WORKDIR /home/${USER]
 
 ENTRYPOINT ["/bin/sh"]
