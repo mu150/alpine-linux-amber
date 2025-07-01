@@ -42,7 +42,9 @@ jobs:
         with:
           context: .
           file: ./Dockerfile
-          platforms: linux/arm64
+          platforms: |
+            linux/amd64
+            linux/arm64
           push: true
           tags: |
             ghcr.io/${{ github.repository_owner }}/alpine-rg353vs:latest
