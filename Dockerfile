@@ -4,7 +4,7 @@ FROM --platform=$TARGETPLATFORM alpine:${ALPINE_VERSION}
 # set a default timezone (optional)
 ENV TZ=UTC
 
-# enable the community repository so we can install qemu-user-static
+# enable the community repository
 RUN sed -i \
     -e 's|/v'"${ALPINE_VERSION}"'/main|&\n/v'"${ALPINE_VERSION}"'/community|' \
     /etc/apk/repositories
@@ -14,7 +14,6 @@ RUN apk update && apk add --no-cache \
       bash \
       alpine-sdk \
       curl \
-      qemu-user-static \
       util-linux \
       parted \
       e2fsprogs \
