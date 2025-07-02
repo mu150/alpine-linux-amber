@@ -73,7 +73,7 @@ jobs:
           sudo apt-get install -y \
             wget parted dosfstools e2fsprogs kmod u-boot-tools
 
-      - name: Build SD-Card Image
+      - name: Build SD‑Card Image
         run: |
           set -euxo pipefail
           SHA=${{ github.sha }}
@@ -81,36 +81,35 @@ jobs:
           UBOOT=uboot.img
           MINIROOT=http://dl-cdn.alpinelinux.org/alpine/v3.19/releases/aarch64/alpine-minirootfs-3.19.0-aarch64.tar.gz
 
-          # download rootfs
+          # 1) download Alpine rootfs
           wget -O rootfs.tar.gz "$MINIROOT"
 
-          # create blank image
+          # 2) create blank 1 GiB image
           truncate -s 1G "$IMG"
 
-          # attach loop device and force partition scanning
-          LOOP=$(sudo losetup --show -fP "$IMG")
-
-          # partition the loop device
-          sudo parted --script "$LOOP" \
+          # 3) partition the image file (works on the file itself)
+          parted --script "$IMG" \
             mklabel msdos \
             mkpart primary fat32 1MiB 64MiB \
             mkpart primary ext4  64MiB 100%
 
-          # notify kernel of partition table changes
+          # 4) attach loop device *after* partitioning
+          LOOP=$(sudo losetup --show -fP "$IMG")
+
+          # 5) kernel re-reads partition table
           sudo partprobe "$LOOP"
 
-          # define partition devices
           BOOT_DEV="${LOOP}p1"
           ROOT_DEV="${LOOP}p2"
 
-          # format partitions
+          # 6) format partitions
           sudo mkfs.vfat -n BOOT "$BOOT_DEV"
           sudo mkfs.ext4 -L ROOTFS "$ROOT_DEV"
 
-          # install u-boot at 8KiB offset
+          # 7) flash U‑Boot at 8 KiB offset
           sudo dd if="$UBOOT" of="$LOOP" bs=1K seek=8 conv=fsync
 
-          # mount and populate
+          # 8) mount & populate
           mkdir -p mnt/boot mnt/root
           sudo mount "$BOOT_DEV" mnt/boot
           sudo mount "$ROOT_DEV" mnt/root
@@ -120,18 +119,19 @@ jobs:
           sudo cp *.dtb mnt/boot/
           sudo cp boot.scr mnt/boot/
 
-          # cleanup
+          # 9) cleanup
           sync
           sudo umount mnt/boot mnt/root
           sudo losetup -d "$LOOP"
 
           ls -lh "$IMG"
 
-      - name: Upload SD-Card artifact
+      - name: Upload SD‑Card artifact
         uses: actions/upload-artifact@v4
         with:
           name: sdcard-${{ github.sha }}
           path: alpine-rg353vs-${{ github.sha }}.img
+
 
   package-release:
     needs: [build-and-push, make-sd-image]
