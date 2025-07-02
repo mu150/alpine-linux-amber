@@ -18,15 +18,14 @@ jobs:
       id-token: write
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Setup QEMU emulation
+      - name: Setup QEMU
         uses: docker/setup-qemu-action@v3
         with:
           platforms: arm64
 
-      - name: Setup Docker Buildx
+      - name: Setup Buildx
         uses: docker/setup-buildx-action@v3
 
       - name: Login to GHCR
@@ -68,14 +67,12 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Install host dependencies
+      - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y \
-            wget parted dosfstools e2fsprogs kmod u-boot-tools
+          sudo apt-get install -y wget parted dosfstools e2fsprogs kmod u-boot-tools
 
       - name: Build SD‑Card Image
         run: |
@@ -85,51 +82,7 @@ jobs:
           UBOOT=uboot.img
           MINIROOT=http://dl-cdn.alpinelinux.org/alpine/v3.19/releases/aarch64/alpine-minirootfs-3.19.0-aarch64.tar.gz
 
-          # Download Alpine rootfs
+          # 1) Download Alpine rootfs
           wget -O rootfs.tar.gz "$MINIROOT"
 
-          # Create blank 1 GiB image file
-          truncate -s 1G "$IMG"
-
-          # Partition the image file (operates on the file directly)
-          parted --script "$IMG" \
-            mklabel msdos \
-            mkpart primary fat32 1MiB 64MiB \
-            mkpart primary ext4  64MiB 100% \
-            set 1 boot on
-
-          # Attach the file as a loop device (kernel now sees partitions)
-          LOOP=$(sudo losetup --show -fP "$IMG")
-          # Ensure the kernel maps partitions
-          sudo partx -a "$LOOP"
-
-          BOOT_DEV="${LOOP}p1"
-          ROOT_DEV="${LOOP}p2"
-
-          # Format each partition
-          sudo mkfs.vfat -F 32 -n BOOT "$BOOT_DEV"
-          sudo mkfs.ext4 -L ROOTFS "$ROOT_DEV"
-
-          # Flash U‑Boot at 8 KiB
-          sudo dd if="$UBOOT" of="$LOOP" bs=1K seek=8 conv=fsync
-
-          # Mount and populate filesystems
-          mkdir -p mnt/boot mnt/root
-          sudo mount -t vfat "$BOOT_DEV" mnt/boot
-          sudo mount -t ext4 "$ROOT_DEV" mnt/root
-
-          sudo tar xzf rootfs.tar.gz -C mnt/root
-          sudo cp zImage   mnt/boot/
-          sudo cp *.dtb    mnt/boot/
-          sudo cp boot.scr mnt/boot/
-
-          # Cleanup
-          sync
-          sudo umount mnt/boot mnt/root
-          sudo losetup -d "$LOOP"
-
-          # Show result
-          ls -lh "$IMG"
-
-      - name: Upload SD‑Card artifact
-        uses: actions/upload-artifact@v4
+          # 2) Create a blank 1
