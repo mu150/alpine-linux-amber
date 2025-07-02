@@ -18,15 +18,14 @@ jobs:
       id-token: write
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Setup QEMU emulation
+      - name: Setup QEMU
         uses: docker/setup-qemu-action@v3
         with:
           platforms: arm64
 
-      - name: Setup Docker Buildx
+      - name: Setup Buildx
         uses: docker/setup-buildx-action@v3
 
       - name: Login to GHCR
@@ -68,10 +67,9 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Install host dependencies
+      - name: Install dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y wget parted dosfstools e2fsprogs kmod u-boot-tools
@@ -87,52 +85,50 @@ jobs:
           # 1) Download Alpine rootfs
           wget -O rootfs.tar.gz "$MINIROOT"
 
-          # 2) Create blank 1 GiB image file
+          # 2) Create blank 1 GiB image file
           truncate -s 1G "$IMG"
 
-          # 3) Attach the raw image to a loop device
-          LOOP=$(sudo losetup --show -f "$IMG")
-
-          # 4) Partition in sector units:
-          #    - sectors are 512 bytes
+          # 3) Partition by sector (512-byte) units:
           #    - Partition 1: 2048–131071 (1 MiB–64 MiB)
           #    - Partition 2: 131072–100% (64 MiB–end)
-          sudo parted --script "$LOOP" unit s \
+          sudo parted --script "$IMG" unit s \
             mklabel msdos \
             mkpart primary fat32 2048 131071 \
-            mkpart primary ext4 131072 100% \
+            mkpart primary ext4  131072 100% \
             set 1 boot on
 
-          # 5) Detach & re‑attach with partition scanning
-          sudo losetup -d "$LOOP"
+          # 4) Attach briefly to format
           LOOP=$(sudo losetup --show -fP "$IMG")
-
           BOOT_DEV="${LOOP}p1"
           ROOT_DEV="${LOOP}p2"
 
-          # 6) Format partitions
           sudo mkfs.vfat -F 32 -n BOOT "$BOOT_DEV"
           sudo mkfs.ext4 -L ROOTFS "$ROOT_DEV"
 
-          # 7) Flash U‑Boot at 8 KiB offset
-          sudo dd if="$UBOOT" of="$LOOP" bs=1K seek=8 conv=fsync
-
-          # 8) Mount & populate
-          mkdir -p mnt/boot mnt/root
-          sudo mount "$BOOT_DEV" mnt/boot
-          sudo mount "$ROOT_DEV" mnt/root
-
-          sudo tar xzf rootfs.tar.gz -C mnt/root
-          sudo cp zImage   mnt/boot/
-          sudo cp *.dtb    mnt/boot/
-          sudo cp boot.scr mnt/boot/
-
-          # 9) Cleanup
-          sync
-          sudo umount mnt/boot mnt/root
           sudo losetup -d "$LOOP"
 
-          # Show final image size
+          # 5) Flash U‑Boot SPL+U-Boot at 8 KiB offset
+          dd if="$UBOOT" of="$IMG" bs=1K seek=8 conv=fsync
+
+          # 6) Mount by byte‐offset and populate
+          mkdir -p mnt/boot mnt/root
+
+          # offsets in bytes:
+          BOOT_OFFSET=$((2048 * 512))      # 1 MiB
+          ROOT_OFFSET=$((131072 * 512))    # 64 MiB
+
+          sudo mount -o loop,offset=$BOOT_OFFSET -t vfat "$IMG" mnt/boot
+          sudo mount -o loop,offset=$ROOT_OFFSET -t ext4 "$IMG" mnt/root
+
+          sudo tar xzf rootfs.tar.gz -C mnt/root
+          sudo cp zImage     mnt/boot/
+          sudo cp *.dtb      mnt/boot/
+          sudo cp boot.scr   mnt/boot/
+
+          # 7) Cleanup
+          sync
+          sudo umount mnt/boot mnt/root
+
           ls -lh "$IMG"
 
       - name: Upload SD‑Card artifact
@@ -142,7 +138,7 @@ jobs:
           path: alpine-rg353vs-${{ github.sha }}.img
 
   package-release:
-    name: Create GitHub Release & Attach Assets
+    name: Create Release & Attach Assets
     needs: [build-and-push, make-sd-image]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
