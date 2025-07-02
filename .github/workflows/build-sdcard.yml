@@ -16,6 +16,7 @@ jobs:
       contents: read
       packages: write
       id-token: write
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -88,27 +89,29 @@ jobs:
           # Create empty 1GiB image
           truncate -s 1G "$IMG"
 
-          # Use guestfish for partitioning, formatting, flashing U‑Boot, and injecting files
+          # Partition, format, flash and inject via guestfish
           sudo guestfish --format=raw -a "$IMG" <<-'EOF'
             run
+            # Create MBR
             part-init /dev/sda mbr
-            # Partition 1: primary, sectors 2048 (1MiB) to 131072 (64MiB)
-            part-add /dev/sda p 2048 131072
-            # Partition 2: primary, sectors 131072 to end
-            part-add /dev/sda p 131072 -1
+            # Partition 1: primary FAT32 from 1MiB (sector 2048) to 64MiB (sector 131071)
+            part-add /dev/sda p 2048 131071
+            # Partition 2: primary ext4 from 64MiB+512B (sector 131073) to end
+            part-add /dev/sda p 131073 -1
             part-set-bootable /dev/sda 1 true
+            # Format
             mkfs vfat /dev/sda1
             mkfs ext4 /dev/sda2
-            # Write U‑Boot at 8KiB offset = 16 sectors of 512B
+            # Flash U‑Boot at 8KiB offset => 16 sectors
             dd if=uboot.img of=/dev/sda bs=512 seek=16
-            # Mount, inject rootfs, and copy boot files
+            # Mount and inject
             mount /dev/sda2 /
             mkdir /boot
             mount /dev/sda1 /boot
             tar-in rootfs.tar.gz /
-            copy-in zImage    /boot/
-            copy-in *.dtb     /boot/
-            copy-in boot.scr  /boot/
+            copy-in zImage   /boot/
+            copy-in *.dtb    /boot/
+            copy-in boot.scr /boot/
             sync
             umount-all
             exit
