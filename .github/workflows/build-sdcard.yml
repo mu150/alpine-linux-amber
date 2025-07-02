@@ -28,7 +28,7 @@ jobs:
       - name: Setup Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Login to GitHub Container Registry
+      - name: Login to GHCR
         uses: docker/login-action@v2
         with:
           registry: ghcr.io
@@ -85,22 +85,26 @@ jobs:
           # Download Alpine rootfs
           wget -O rootfs.tar.gz "$ROOTFS_TAR"
 
-          # Create empty 1GiB image
+          # Create empty 1 GiB image
           truncate -s 1G "$IMG"
 
-          # Use guestfish to partition, format, flash U‑Boot, and inject files
+          # guestfish: open image as raw, then partition/format/copy
           sudo guestfish --format=raw -a "$IMG" <<-'EOF'
             run
+            # Initialize MBR
             part-init /dev/sda mbr
-            # Partition 1: FAT32 from 1MiB to 64MiB
-            part-add /dev/sda primary fat32 1MiB 64MiB
-            # Partition 2: ext4 from 64MiB to end
-            part-add /dev/sda primary ext4 64MiB 100%
+            # Partition 1: FAT32 from sector 2048 (1MiB) to 131072 (64MiB)
+            part-add /dev/sda primary fat32 2048 131072
+            # Partition 2: ext4 from sector 131072 to end
+            part-add /dev/sda primary ext4 131072 -1
+            # Mark partition 1 bootable
             part-set-bootable /dev/sda 1 true
+            # Format filesystems
             mkfs vfat /dev/sda1
             mkfs ext4 /dev/sda2
-            # Write U‑Boot at 8KiB offset => 8KiB/512B = 16 sectors
+            # Flash U‑Boot at 8 KiB offset = 16 sectors
             dd if=uboot.img of=/dev/sda bs=512 seek=16
+            # Mount, inject rootfs, and copy boot files
             mount /dev/sda2 /
             mkdir /boot
             mount /dev/sda1 /boot
