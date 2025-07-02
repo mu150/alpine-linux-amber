@@ -51,8 +51,8 @@ jobs:
       - name: Save container tarball
         run: |
           IMAGE=ghcr.io/${{ github.repository_owner }}/alpine-rg353vs:${{ github.sha }}
-          docker pull $IMAGE
-          docker save $IMAGE | gzip > alpine-rg353vs-${{ github.sha }}.tar.gz
+          docker pull "$IMAGE"
+          docker save "$IMAGE" | gzip > alpine-rg353vs-${{ github.sha }}.tar.gz
 
       - name: Upload container artifact
         uses: actions/upload-artifact@v4
@@ -71,7 +71,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            wget parted dosfstools e2fsprogs kmod u-boot-tools kpartx
+            wget parted dosfstools e2fsprogs kmod u-boot-tools
 
       - name: Build SD-Card Image
         run: |
@@ -82,39 +82,40 @@ jobs:
           MINIROOT=http://dl-cdn.alpinelinux.org/alpine/v3.19/releases/aarch64/alpine-minirootfs-3.19.0-aarch64.tar.gz
 
           # download rootfs
-          wget -O rootfs.tar.gz $MINIROOT
+          wget -O rootfs.tar.gz "$MINIROOT"
 
           # create blank image
-          truncate -s 1G $IMG
+          truncate -s 1G "$IMG"
 
-          # partition image: 1MiB–64MiB FAT, 64MiB–end EXT4
-          parted --script $IMG \
+          # attach loop device and force partition scanning
+          LOOP=$(sudo losetup --show -fP "$IMG")
+
+          # partition the loop device
+          sudo parted --script "$LOOP" \
             mklabel msdos \
             mkpart primary fat32 1MiB 64MiB \
             mkpart primary ext4  64MiB 100%
 
-          # map with kpartx
-          LOOP=$(sudo losetup --show -f $IMG)
-          sudo partprobe $LOOP
-          sudo kpartx -av $LOOP
+          # notify kernel of partition table changes
+          sudo partprobe "$LOOP"
 
-          BOOT_DEV=/dev/mapper/$(basename $LOOP)p1
-          ROOT_DEV=/dev/mapper/$(basename $LOOP)p2
+          # define partition devices
+          BOOT_DEV="${LOOP}p1"
+          ROOT_DEV="${LOOP}p2"
 
-          # format
-          sudo mkfs.vfat -n BOOT $BOOT_DEV
-          sudo mkfs.ext4 -L ROOTFS $ROOT_DEV
+          # format partitions
+          sudo mkfs.vfat -n BOOT "$BOOT_DEV"
+          sudo mkfs.ext4 -L ROOTFS "$ROOT_DEV"
 
-          # install u-boot at 8KiB
-          sudo dd if=$UBOOT of=$LOOP bs=1K seek=8 conv=fsync
+          # install u-boot at 8KiB offset
+          sudo dd if="$UBOOT" of="$LOOP" bs=1K seek=8 conv=fsync
 
           # mount and populate
           mkdir -p mnt/boot mnt/root
-          sudo mount -t vfat $BOOT_DEV mnt/boot
-          sudo mount -t ext4 $ROOT_DEV mnt/root
+          sudo mount "$BOOT_DEV" mnt/boot
+          sudo mount "$ROOT_DEV" mnt/root
 
           sudo tar xzf rootfs.tar.gz -C mnt/root
-          # copy kernel, dtb, boot.scr
           sudo cp zImage mnt/boot/
           sudo cp *.dtb mnt/boot/
           sudo cp boot.scr mnt/boot/
@@ -122,10 +123,9 @@ jobs:
           # cleanup
           sync
           sudo umount mnt/boot mnt/root
-          sudo kpartx -dv $LOOP
-          sudo losetup -d $LOOP
+          sudo losetup -d "$LOOP"
 
-          ls -lh $IMG
+          ls -lh "$IMG"
 
       - name: Upload SD-Card artifact
         uses: actions/upload-artifact@v4
