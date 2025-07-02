@@ -81,45 +81,47 @@ jobs:
           UBOOT=uboot.img
           MINIROOT=http://dl-cdn.alpinelinux.org/alpine/v3.19/releases/aarch64/alpine-minirootfs-3.19.0-aarch64.tar.gz
 
-          # 1) download Alpine rootfs
+          # Download Alpine rootfs
           wget -O rootfs.tar.gz "$MINIROOT"
 
-          # 2) create blank 1 GiB image
+          # Create blank 1 GiB image
           truncate -s 1G "$IMG"
 
-          # 3) partition the image file (works on the file itself)
-          parted --script "$IMG" \
+          # 1) Attach the raw file as a loop device (no partitions yet)
+          LOOP=$(sudo losetup --show -f "$IMG")
+
+          # 2) Partition the loop device itself
+          sudo parted --script "$LOOP" \
             mklabel msdos \
             mkpart primary fat32 1MiB 64MiB \
             mkpart primary ext4  64MiB 100%
 
-          # 4) attach loop device *after* partitioning
+          # 3) Detach and re‑attach with -P so /dev/loopNp1 & p2 appear
+          sudo losetup -d "$LOOP"
           LOOP=$(sudo losetup --show -fP "$IMG")
 
-          # 5) kernel re-reads partition table
-          sudo partprobe "$LOOP"
-
+          # Define partition device paths
           BOOT_DEV="${LOOP}p1"
           ROOT_DEV="${LOOP}p2"
 
-          # 6) format partitions
+          # 4) Format partitions
           sudo mkfs.vfat -n BOOT "$BOOT_DEV"
           sudo mkfs.ext4 -L ROOTFS "$ROOT_DEV"
 
-          # 7) flash U‑Boot at 8 KiB offset
+          # 5) Flash U‑Boot at 8 KiB offset
           sudo dd if="$UBOOT" of="$LOOP" bs=1K seek=8 conv=fsync
 
-          # 8) mount & populate
+          # 6) Mount & populate
           mkdir -p mnt/boot mnt/root
           sudo mount "$BOOT_DEV" mnt/boot
           sudo mount "$ROOT_DEV" mnt/root
 
           sudo tar xzf rootfs.tar.gz -C mnt/root
-          sudo cp zImage mnt/boot/
-          sudo cp *.dtb mnt/boot/
-          sudo cp boot.scr mnt/boot/
+          sudo cp zImage     mnt/boot/
+          sudo cp *.dtb      mnt/boot/
+          sudo cp boot.scr   mnt/boot/
 
-          # 9) cleanup
+          # 7) Cleanup
           sync
           sudo umount mnt/boot mnt/root
           sudo losetup -d "$LOOP"
@@ -131,6 +133,7 @@ jobs:
         with:
           name: sdcard-${{ github.sha }}
           path: alpine-rg353vs-${{ github.sha }}.img
+
 
 
   package-release:
