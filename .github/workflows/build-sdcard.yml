@@ -1,4 +1,4 @@
-name: Build & Release Alpine RG353VS SD‑Card Image
+name: Build & Release Alpine RG353VS SD‑Card Image (guestfish)
 
 on:
   push:
@@ -7,13 +7,14 @@ on:
   workflow_dispatch:
 
 jobs:
+  # 1️⃣ Build & push the container image
   build-and-push:
-    name: Build & Push Container
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
       id-token: write
+
     steps:
       - uses: actions/checkout@v4
 
@@ -58,68 +59,61 @@ jobs:
           name: container-${{ github.sha }}
           path: alpine-rg353vs-${{ github.sha }}.tar.gz
 
+  # 2️⃣ Build the SD‑Card image using guestfish
   make-sd-image:
-    name: Build SD‑Card Image
     needs: build-and-push
     runs-on: ubuntu-latest
+
     steps:
       - uses: actions/checkout@v4
 
       - name: Install host dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y wget parted dosfstools e2fsprogs kmod u-boot-tools
+          sudo apt-get install -y \
+            wget libguestfs-tools
 
-      - name: Build SD‑Card Image (partition on loop)
+      - name: Build SD‑Card Image with guestfish
         run: |
           set -euxo pipefail
-
           SHA=${{ github.sha }}
           IMG=alpine-rg353vs-${SHA}.img
           UBOOT=uboot.img
-          ROOTFS_URL="http://dl-cdn.alpinelinux.org/alpine/v3.19/releases/aarch64/alpine-minirootfs-3.19.0-aarch64.tar.gz"
+          ROOTFS_TAR=http://dl-cdn.alpinelinux.org/alpine/v3.19/releases/aarch64/alpine-minirootfs-3.19.0-aarch64.tar.gz
 
-          # Download Alpine rootfs
-          wget -O rootfs.tar.gz "$ROOTFS_URL"
+          # Fetch the Alpine aarch64 minirootfs
+          wget -O rootfs.tar.gz "$ROOTFS_TAR"
 
-          # 1) Create blank 1 GiB image and attach to loop
+          # Create an empty 1 GiB disk image
           truncate -s 1G "$IMG"
-          LOOP=$(sudo losetup --show -f "$IMG")
 
-          # 2) Partition the loop device itself
-          sudo parted --script "$LOOP" \
-            mklabel msdos \
-            mkpart primary fat32 1MiB 64MiB \
-            mkpart primary ext4 64MiB 100% \
-            set 1 boot on
-
-          # 3) Let kernel re‑read partition table
-          sudo partprobe "$LOOP"
-
-          BOOT_DEV="${LOOP}p1"
-          ROOT_DEV="${LOOP}p2"
-
-          # 4) Format partitions
-          sudo mkfs.vfat -F 32 -n BOOT "$BOOT_DEV"
-          sudo mkfs.ext4 -L ROOTFS "$ROOT_DEV"
-
-          # 5) Flash U‑Boot SPL+U-Boot at 8 KiB offset
-          sudo dd if="$UBOOT" of="$LOOP" bs=1K seek=8 conv=fsync
-
-          # 6) Mount and populate
-          mkdir -p mnt/boot mnt/root
-          sudo mount "$BOOT_DEV" mnt/boot
-          sudo mount "$ROOT_DEV" mnt/root
-
-          sudo tar xzf rootfs.tar.gz -C mnt/root
-          sudo cp zImage   mnt/boot/
-          sudo cp *.dtb    mnt/boot/
-          sudo cp boot.scr mnt/boot/
-
-          # 7) Cleanup
-          sync
-          sudo umount mnt/boot mnt/root
-          sudo losetup -d "$LOOP"
+          # Use guestfish to partition, format, install U‑Boot, and inject files
+          sudo guestfish <<-EOF
+            set -a $IMG
+            run
+            # Partition: DOS, 1MiB–64MiB FAT32, rest ext4
+            part-init /dev/sda mbr
+            part-add   /dev/sda primary fat32 1MiB 64MiB
+            part-add   /dev/sda primary ext4 64MiB 100%
+            # Format filesystems
+            mkfs vfat /dev/sda1
+            mkfs ext4 /dev/sda2
+            # Flash U‑Boot at 8 KiB
+            # (guestfish 'dd' op takes offset in bytes)
+            dd if=$UBOOT of=/dev/sda bs=1 seek=8
+            # Mount and copy
+            mount /dev/sda2 /
+            mkdir /boot
+            mount /dev/sda1 /boot
+            # Inject rootfs and boot files
+            tar-in rootfs.tar.gz /
+            copy-in zImage       /boot/
+            copy-in *.dtb        /boot/
+            copy-in boot.scr     /boot/
+            sync
+            umount-all
+            exit
+          EOF
 
           ls -lh "$IMG"
 
@@ -129,8 +123,8 @@ jobs:
           name: sdcard-${{ github.sha }}
           path: alpine-rg353vs-${{ github.sha }}.img
 
+  # 3️⃣ On tag pushes, make a GitHub Release
   package-release:
-    name: Create Release & Attach Assets
     needs: [build-and-push, make-sd-image]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
