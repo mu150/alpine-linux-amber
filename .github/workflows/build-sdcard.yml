@@ -86,3 +86,95 @@ jobs:
           wget -O rootfs.tar.gz "$MINIROOT"
 
           # 2) Create a blank 1
+          truncate -s 1G "$IMG"
+
+          # 3) Attach the raw image and note the loop device
+          LOOP=$(sudo losetup --show -f "$IMG")
+
+          # 4) Use sector-based parted to carve out partitions:
+          #    - sectors are 512 bytes each
+          #    - Partition 1: 2048s (1 MiB) → 131071s (64 MiB)
+          #    - Partition 2: 131072s → end
+          sudo parted --script "$LOOP" \
+            mklabel msdos \
+            mkpart primary fat32 2048s 131071s \
+            mkpart primary ext4  131072s 100% \
+            set 1 boot on
+
+          # 5) Detach and re-attach with -P so /dev/loopNp1 & p2 appear
+          sudo losetup -d "$LOOP"
+          LOOP=$(sudo losetup --show -fP "$IMG")
+
+          BOOT_DEV="${LOOP}p1"
+          ROOT_DEV="${LOOP}p2"
+
+          # 6) Format partitions
+          sudo mkfs.vfat -F 32 -n BOOT "$BOOT_DEV"
+          sudo mkfs.ext4 -L ROOTFS "$ROOT_DEV"
+
+          # 7) Flash U‑Boot at 8 KiB offset
+          sudo dd if="$UBOOT" of="$LOOP" bs=1K seek=8 conv=fsync
+
+          # 8) Mount & populate
+          mkdir -p mnt/boot mnt/root
+          sudo mount "$BOOT_DEV" mnt/boot
+          sudo mount "$ROOT_DEV" mnt/root
+
+          sudo tar xzf rootfs.tar.gz -C mnt/root
+          sudo cp zImage   mnt/boot/
+          sudo cp *.dtb    mnt/boot/
+          sudo cp boot.scr mnt/boot/
+
+          # 9) Cleanup
+          sync
+          sudo umount mnt/boot mnt/root
+          sudo losetup -d "$LOOP"
+
+          ls -lh "$IMG"
+
+      - name: Upload SD‑Card artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sdcard-${{ github.sha }}
+          path: alpine-rg353vs-${{ github.sha }}.img
+
+  package-release:
+    name: Create Release & Attach Assets
+    needs: [build-and-push, make-sd-image]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create GitHub Release
+        id: release
+        uses: ncipollo/release-action@v1
+        with:
+          tag: ${{ github.ref_name }}
+          name: Release ${{ github.ref_name }}
+          body: |
+            - **Container**: ghcr.io/${{ github.repository_owner }}/alpine-rg353vs:${{ github.sha }}
+            - **SD‑Card image**: alpine-rg353vs-${{ github.ref_name }}.img
+            - **Container tarball**: alpine-rg353vs-${{ github.ref_name }}.tar.gz
+          draft: false
+          prerelease: false
+
+      - name: Upload SD‑Card release asset
+        uses: actions/upload-release-asset@v4
+        with:
+          upload_url: ${{ steps.release.outputs.upload_url }}
+          asset_path: artifacts/alpine-rg353vs-${{ github.sha }}.img
+          asset_name: alpine-rg353vs-${{ github.ref_name }}.img
+          asset_content_type: application/octet-stream
+
+      - name: Upload container release asset
+        uses: actions/upload-release-asset@v4
+        with:
+          upload_url: ${{ steps.release.outputs.upload_url }}
+          asset_path: artifacts/alpine-rg353vs-${{ github.sha }}.tar.gz
+          asset_name: alpine-rg353vs-${{ github.ref_name }}.tar.gz
+          asset_content_type: application/gzip
