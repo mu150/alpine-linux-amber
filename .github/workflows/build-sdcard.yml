@@ -81,7 +81,8 @@ jobs:
           GITHUB_SHA: ${{ github.sha }}
         run: |
           chmod +x ./make-sd-image.sh
-          ./make-sd-image.sh
+          # run the script as root so losetup, mkfs, etc. can work
+          sudo ./make-sd-image.sh
 
       - name: Upload SD‑card image artifact
         uses: actions/upload-artifact@v4
@@ -109,7 +110,7 @@ jobs:
           tag: ${{ github.ref_name }}
           name: Release ${{ github.ref_name }}
           body: |
-            - **Container**: ghcr.io/${{ github.repository_owner }}/alpine-rg353vs: ${{ github.sha }}  
+            - **Container**: ghcr.io/${{ github.repository_owner }}/alpine-rg353vs:${{ github.sha }}  
             - **SD‑card image**: alpine-rg353vs-${{ github.ref_name }}.img
           draft: false
           prerelease: false
@@ -122,7 +123,7 @@ jobs:
           asset_name: alpine-rg353vs-${{ github.ref_name }}.img
           asset_content_type: application/octet-stream
 
-      # (Optional) Attach the container tarball too:
+      # (Optional) Attach the container tarball as well
       - name: Download container artifact
         uses: actions/download-artifact@v4
         with:
