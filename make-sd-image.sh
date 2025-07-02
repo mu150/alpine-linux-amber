@@ -1,56 +1,56 @@
-#!/usr/bin/env bash
 set -euxo pipefail
 
-# 1. variables
-IMG=alpine-rg353vs-${GITHUB_SHA}.img
-UBOOT=uboot.img
-MINIROOT=http://dl-cdn.alpinelinux.org/alpine/v3.19/releases/aarch64/alpine-minirootfs-3.19.0-aarch64.tar.gz
-WORKDIR=$(mktemp -d)
-BOOT_SIZE=64      # MiB
-TOTAL_SIZE=1024   # MiB
+# Vars
+SHA=${{ github.sha }}
+IMG="alpine-rg353vs-${SHA}.img"
+UBOOT="uboot.img"
+MINIROOT="http://dl-cdn.alpinelinux.org/alpine/v3.19/releases/aarch64/alpine-minirootfs-3.19.0-aarch64.tar.gz"
 
-# 2. fetch rootfs and u‑boot
-wget -O "$WORKDIR/rootfs.tar.gz" "$MINIROOT"
-cp "$UBOOT" "$WORKDIR/uboot.img"
+# Download Alpine rootfs
+wget -O rootfs.tar.gz "$MINIROOT"
 
-# 3. create empty image
-truncate -s ${TOTAL_SIZE}M "$IMG"
+# Create blank 1 GiB image
+truncate -s 1G "$IMG"
 
-# 4. partition: 1=FAT32 @ [1MiB–${BOOT_SIZE}MiB],  2=ext4 @ [${BOOT_SIZE}MiB–end]
-parted --script "$IMG" \
+# Attach image file as loop device
+LOOP=$(sudo losetup --show -f "$IMG")
+
+# Partition the loop device directly
+sudo parted --script "$LOOP" \
   mklabel msdos \
-  mkpart primary fat32 1MiB ${BOOT_SIZE}MiB \
-  mkpart primary ext4  ${BOOT_SIZE}MiB 100%
+  mkpart primary fat32 1MiB 64MiB \
+  mkpart primary ext4 64MiB 100%
 
-# 5. map to loop devices
-LOOP=$(losetup --show -fP "$IMG")
-BOOT_DEV=${LOOP}p1
-ROOT_DEV=${LOOP}p2
+# Detach and reattach to trigger /dev/loopXpY devices
+sudo losetup -d "$LOOP"
+LOOP=$(sudo losetup --show -fP "$IMG")
 
-# 6. format
-mkfs.vfat -n BOOT "$BOOT_DEV"
-mkfs.ext4 -L ROOTFS "$ROOT_DEV"
+# Wait for /dev/loopNp1 and loopNp2 to appear
+sleep 2
+BOOT_DEV="${LOOP}p1"
+ROOT_DEV="${LOOP}p2"
 
-# 7. install u-boot (at 8KiB)
-dd if="$WORKDIR/uboot.img" of="$IMG" bs=1K seek=8 conv=fsync
+# Format partitions
+sudo mkfs.vfat -F 32 -n BOOT "$BOOT_DEV"
+sudo mkfs.ext4 -L ROOTFS "$ROOT_DEV"
 
-# 8. mount & populate
-mkdir -p "$WORKDIR"/{mnt/boot,mnt/root}
-mount "$BOOT_DEV" "$WORKDIR/mnt/boot"
-mount "$ROOT_DEV" "$WORKDIR/mnt/root"
+# Write u-boot at 8 KiB offset
+sudo dd if="$UBOOT" of="$LOOP" bs=1K seek=8 conv=fsync
 
-# 8a. extract rootfs
-tar xzf "$WORKDIR/rootfs.tar.gz" -C "$WORKDIR/mnt/root"
+# Mount and populate partitions
+mkdir -p mnt/boot mnt/root
+sudo mount "$BOOT_DEV" mnt/boot
+sudo mount "$ROOT_DEV" mnt/root
 
-# 8b. copy kernel, dtb, boot script
-cp linux-firmware/*.dtb "$WORKDIR/mnt/boot"/
-cp zImage "$WORKDIR/mnt/boot"/
-cp boot.scr "$WORKDIR/mnt/boot"/
+# Extract Alpine rootfs
+sudo tar -xzf rootfs.tar.gz -C mnt/root
 
-# 9. cleanup
+# Copy kernel and boot files
+sudo cp zImage mnt/boot/
+sudo cp *.dtb mnt/boot/
+sudo cp boot.scr mnt/boot/
+
+# Cleanup
 sync
-umount "$WORKDIR"/mnt/{boot,root}
-losetup -d "$LOOP"
-rm -rf "$WORKDIR"
-
-echo "Created $IMG"
+sudo umount mnt/boot mnt/root
+sudo losetup -d "$LOOP"
