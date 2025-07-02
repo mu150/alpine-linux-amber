@@ -2,15 +2,12 @@ name: Build & Release Alpine RG353VS SD‑Card Image
 
 on:
   push:
-    branches:
-      - main
-    tags:
-      - 'v*'
+    branches: [ main ]
+    tags: [ 'v*' ]
   workflow_dispatch:
 
 jobs:
   build-and-push:
-    name: Build & Push Container
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -20,13 +17,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup QEMU
+      - name: QEMU & Buildx
         uses: docker/setup-qemu-action@v3
-        with:
-          platforms: arm64
-
-      - name: Setup Buildx
-        uses: docker/setup-buildx-action@v3
+        with: { platforms: arm64 }
+      - uses: docker/setup-buildx-action@v3
 
       - name: Login to GHCR
         uses: docker/login-action@v2
@@ -35,7 +29,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build & push multi‑arch image
+      - name: Build & Push Image
         id: build
         uses: docker/build-push-action@v4
         with:
@@ -62,7 +56,6 @@ jobs:
           path: alpine-rg353vs-${{ github.sha }}.tar.gz
 
   make-sd-image:
-    name: Build SD‑Card Image
     needs: build-and-push
     runs-on: ubuntu-latest
 
@@ -82,53 +75,52 @@ jobs:
           UBOOT=uboot.img
           MINIROOT=http://dl-cdn.alpinelinux.org/alpine/v3.19/releases/aarch64/alpine-minirootfs-3.19.0-aarch64.tar.gz
 
-          # 1) Download Alpine rootfs
+          # Download Alpine rootfs
           wget -O rootfs.tar.gz "$MINIROOT"
 
-          # 2) Create a blank 1
+          # 1) Create blank 1 GiB image
           truncate -s 1G "$IMG"
 
-          # 3) Attach the raw image and note the loop device
-          LOOP=$(sudo losetup --show -f "$IMG")
-
-          # 4) Use sector-based parted to carve out partitions:
-          #    - sectors are 512 bytes each
-          #    - Partition 1: 2048s (1 MiB) → 131071s (64 MiB)
-          #    - Partition 2: 131072s → end
-          sudo parted --script "$LOOP" \
+          # 2) Partition by BMBR with sector units
+          #    - 512-byte sectors: 2048s = 1 MiB, 131071s = 64 MiB - 1
+          parted --script "$IMG" \
             mklabel msdos \
-            mkpart primary fat32 2048s 131071s \
-            mkpart primary ext4  131072s 100% \
+            unit s \
+            mkpart primary fat32 2048 131071 \
+            mkpart primary ext4 131072 -1 \
             set 1 boot on
 
-          # 5) Detach and re-attach with -P so /dev/loopNp1 & p2 appear
-          sudo losetup -d "$LOOP"
+          # 3) Attach image to a loop device for mkfs
           LOOP=$(sudo losetup --show -fP "$IMG")
-
           BOOT_DEV="${LOOP}p1"
           ROOT_DEV="${LOOP}p2"
 
-          # 6) Format partitions
+          # 4) Format partitions
           sudo mkfs.vfat -F 32 -n BOOT "$BOOT_DEV"
           sudo mkfs.ext4 -L ROOTFS "$ROOT_DEV"
 
-          # 7) Flash U‑Boot at 8 KiB offset
-          sudo dd if="$UBOOT" of="$LOOP" bs=1K seek=8 conv=fsync
+          # 5) Detach the loop device
+          sudo losetup -d "$LOOP"
 
-          # 8) Mount & populate
+          # 6) Flash U‑Boot at 8 KiB offset in the raw image
+          dd if="$UBOOT" of="$IMG" bs=1K seek=8 conv=fsync
+
+          # 7) Mount by offset and populate
           mkdir -p mnt/boot mnt/root
-          sudo mount "$BOOT_DEV" mnt/boot
-          sudo mount "$ROOT_DEV" mnt/root
+
+          # FAT partition starts at 1 MiB = 1048576 bytes
+          sudo mount -o loop,offset=1048576 -t vfat "$IMG" mnt/boot
+          # ext4 partition starts at 64 MiB = 67108864 bytes
+          sudo mount -o loop,offset=67108864 -t ext4 "$IMG" mnt/root
 
           sudo tar xzf rootfs.tar.gz -C mnt/root
-          sudo cp zImage   mnt/boot/
-          sudo cp *.dtb    mnt/boot/
-          sudo cp boot.scr mnt/boot/
+          sudo cp zImage     mnt/boot/
+          sudo cp *.dtb      mnt/boot/
+          sudo cp boot.scr   mnt/boot/
 
-          # 9) Cleanup
+          # 8) Cleanup
           sync
           sudo umount mnt/boot mnt/root
-          sudo losetup -d "$LOOP"
 
           ls -lh "$IMG"
 
@@ -139,7 +131,6 @@ jobs:
           path: alpine-rg353vs-${{ github.sha }}.img
 
   package-release:
-    name: Create Release & Attach Assets
     needs: [build-and-push, make-sd-image]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
