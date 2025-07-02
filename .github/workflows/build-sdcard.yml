@@ -105,7 +105,7 @@ sync
 umount-all
 EOF
 
-              ls -lh "$IMG"
+               ls -lh "$IMG"
 
 
       - name: Upload SD‑Card artifact
