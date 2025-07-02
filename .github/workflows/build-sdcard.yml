@@ -85,24 +85,21 @@ jobs:
           # Download Alpine rootfs
           wget -O rootfs.tar.gz "$ROOTFS_TAR"
 
-          # Create empty 1 GiB image
+          # Create empty 1GiB image
           truncate -s 1G "$IMG"
 
-          # guestfish: open image as raw, then partition/format/copy
+          # Use guestfish for partitioning, formatting, flashing U‑Boot, and injecting files
           sudo guestfish --format=raw -a "$IMG" <<-'EOF'
             run
-            # Initialize MBR
             part-init /dev/sda mbr
-            # Partition 1: FAT32 from sector 2048 (1MiB) to 131072 (64MiB)
-            part-add /dev/sda primary fat32 2048 131072
-            # Partition 2: ext4 from sector 131072 to end
-            part-add /dev/sda primary ext4 131072 -1
-            # Mark partition 1 bootable
+            # Partition 1: primary, sectors 2048 (1MiB) to 131072 (64MiB)
+            part-add /dev/sda p 2048 131072
+            # Partition 2: primary, sectors 131072 to end
+            part-add /dev/sda p 131072 -1
             part-set-bootable /dev/sda 1 true
-            # Format filesystems
             mkfs vfat /dev/sda1
             mkfs ext4 /dev/sda2
-            # Flash U‑Boot at 8 KiB offset = 16 sectors
+            # Write U‑Boot at 8KiB offset = 16 sectors of 512B
             dd if=uboot.img of=/dev/sda bs=512 seek=16
             # Mount, inject rootfs, and copy boot files
             mount /dev/sda2 /
