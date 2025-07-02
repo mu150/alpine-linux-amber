@@ -2,15 +2,13 @@ name: Build & Release Alpine RG353VS SD‑Card Image
 
 on:
   push:
-    branches:
-      - main
-    tags:
-      - 'v*'
+    branches: [ main ]
+    tags: [ 'v*' ]
   workflow_dispatch:
 
 jobs:
-  # 1) Build & push the multi‑arch container
   build-and-push:
+    name: Build & Push Container
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -60,73 +58,68 @@ jobs:
           name: container-${{ github.sha }}
           path: alpine-rg353vs-${{ github.sha }}.tar.gz
 
-  # 2) Build the SD‑Card image (using per‑partition loop offsets)
   make-sd-image:
+    name: Build SD‑Card Image
     needs: build-and-push
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install dependencies
+      - name: Install host dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y wget parted dosfstools e2fsprogs kmod u-boot-tools
 
-      - name: Build SD‑Card Image
+      - name: Build SD‑Card Image (partition on loop)
         run: |
           set -euxo pipefail
 
           SHA=${{ github.sha }}
           IMG=alpine-rg353vs-${SHA}.img
           UBOOT=uboot.img
-          MINIROOT="http://dl-cdn.alpinelinux.org/alpine/v3.19/releases/aarch64/alpine-minirootfs-3.19.0-aarch64.tar.gz"
+          ROOTFS_URL="http://dl-cdn.alpinelinux.org/alpine/v3.19/releases/aarch64/alpine-minirootfs-3.19.0-aarch64.tar.gz"
 
           # Download Alpine rootfs
-          wget -O rootfs.tar.gz "$MINIROOT"
+          wget -O rootfs.tar.gz "$ROOTFS_URL"
 
-          # 1) Create blank 1 GiB image
+          # 1) Create blank 1 GiB image and attach to loop
           truncate -s 1G "$IMG"
+          LOOP=$(sudo losetup --show -f "$IMG")
 
-          # 2) Partition in-sector units (512 B):
-          #    Part1: 2048–131071 (1 MiB–64 MiB)
-          #    Part2: 131072–100%    (64 MiB–end)
-          sudo parted --script "$IMG" unit s \
+          # 2) Partition the loop device itself
+          sudo parted --script "$LOOP" \
             mklabel msdos \
-            mkpart primary fat32 2048 131071 \
-            mkpart primary ext4  131072 100% \
+            mkpart primary fat32 1MiB 64MiB \
+            mkpart primary ext4 64MiB 100% \
             set 1 boot on
 
-          # compute byte offsets
-          BOOT_OFFSET=$((2048 * 512))      # 1 MiB
-          ROOT_OFFSET=$((131072 * 512))    # 64 MiB
+          # 3) Let kernel re‑read partition table
+          sudo partprobe "$LOOP"
 
-          # 3) Format PARTITION 1 via a transient loop device
-          BOOT_LOOP=$(sudo losetup --show -f -o $BOOT_OFFSET "$IMG")
-          sudo mkfs.vfat -F 32 -n BOOT "$BOOT_LOOP"
-          sudo losetup -d "$BOOT_LOOP"
+          BOOT_DEV="${LOOP}p1"
+          ROOT_DEV="${LOOP}p2"
 
-          # 4) Format PARTITION 2 via a transient loop device
-          ROOT_LOOP=$(sudo losetup --show -f -o $ROOT_OFFSET "$IMG")
-          sudo mkfs.ext4 -L ROOTFS "$ROOT_LOOP"
-          sudo losetup -d "$ROOT_LOOP"
+          # 4) Format partitions
+          sudo mkfs.vfat -F 32 -n BOOT "$BOOT_DEV"
+          sudo mkfs.ext4 -L ROOTFS "$ROOT_DEV"
 
-          # 5) Flash U‑Boot at 8 KiB offset
-          sudo dd if="$UBOOT" of="$IMG" bs=1K seek=8 conv=fsync
+          # 5) Flash U‑Boot SPL+U-Boot at 8 KiB offset
+          sudo dd if="$UBOOT" of="$LOOP" bs=1K seek=8 conv=fsync
 
-          # 6) Mount each partition by offset and populate
+          # 6) Mount and populate
           mkdir -p mnt/boot mnt/root
-
-          sudo mount -o loop,offset=$BOOT_OFFSET -t vfat "$IMG" mnt/boot
-          sudo mount -o loop,offset=$ROOT_OFFSET -t ext4 "$IMG" mnt/root
+          sudo mount "$BOOT_DEV" mnt/boot
+          sudo mount "$ROOT_DEV" mnt/root
 
           sudo tar xzf rootfs.tar.gz -C mnt/root
-          sudo cp zImage     mnt/boot/
-          sudo cp *.dtb      mnt/boot/
-          sudo cp boot.scr   mnt/boot/
+          sudo cp zImage   mnt/boot/
+          sudo cp *.dtb    mnt/boot/
+          sudo cp boot.scr mnt/boot/
 
-          # cleanup
+          # 7) Cleanup
           sync
           sudo umount mnt/boot mnt/root
+          sudo losetup -d "$LOOP"
 
           ls -lh "$IMG"
 
@@ -136,8 +129,8 @@ jobs:
           name: sdcard-${{ github.sha }}
           path: alpine-rg353vs-${{ github.sha }}.img
 
-  # 3) On tag pushes, create a Release and attach artifacts
   package-release:
+    name: Create Release & Attach Assets
     needs: [build-and-push, make-sd-image]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
