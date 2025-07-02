@@ -1,4 +1,4 @@
-name: Build & Release Alpine RG353VS SD‑Card Image (guestfish)
+name: Build & Release Alpine RG353VS SD-Card Image (guestfish)
 
 on:
   push:
@@ -16,7 +16,6 @@ jobs:
       contents: read
       packages: write
       id-token: write
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -36,7 +35,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build & push multi‑arch image
+      - name: Build & push multi-arch image
         id: build
         uses: docker/build-push-action@v4
         with:
@@ -63,7 +62,7 @@ jobs:
           path: alpine-rg353vs-${{ github.sha }}.tar.gz
 
   make-sd-image:
-    name: Build SD‑Card Image with guestfish
+    name: Build SD-Card Image with guestfish
     needs: build-and-push
     runs-on: ubuntu-latest
     steps:
@@ -75,7 +74,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y wget libguestfs-tools
 
-      - name: Build SD‑Card Image
+      - name: Build SD-Card Image
         run: |
           set -euxo pipefail
           SHA=${{ github.sha }}
@@ -86,32 +85,29 @@ jobs:
           # Download Alpine rootfs
           wget -O rootfs.tar.gz "$ROOTFS_TAR"
 
-          # Create empty 1GiB image
+          # Create empty 1 GiB image
           truncate -s 1G "$IMG"
 
-          # Partition, format, flash and inject via guestfish
+          # Partition, format, flash U-Boot, and inject via guestfish
           sudo guestfish --format=raw -a "$IMG" <<-'EOF'
             run
-            # Create MBR
             part-init /dev/sda mbr
-            # Partition 1: primary FAT32 from 1MiB (sector 2048) to 64MiB (sector 131071)
+            # Partition 1: sectors 2048–131071 (1 MiB–64 MiB)
             part-add /dev/sda p 2048 131071
-            # Partition 2: primary ext4 from 64MiB+512B (sector 131073) to end
-            part-add /dev/sda p 131073 -1
+            # Partition 2: sectors 131072–end
+            part-add /dev/sda p 131072 -1
             part-set-bootable /dev/sda 1 true
-            # Format
             mkfs vfat /dev/sda1
             mkfs ext4 /dev/sda2
-            # Flash U‑Boot at 8KiB offset => 16 sectors
-            dd if=uboot.img of=/dev/sda bs=512 seek=16
-            # Mount and inject
+            # Write SPL+U-Boot at byte offset 8192 (8 KiB)
+            pwrite /dev/sda uboot.img 8192
             mount /dev/sda2 /
             mkdir /boot
             mount /dev/sda1 /boot
             tar-in rootfs.tar.gz /
-            copy-in zImage   /boot/
-            copy-in *.dtb    /boot/
-            copy-in boot.scr /boot/
+            copy-in zImage    /boot/
+            copy-in *.dtb     /boot/
+            copy-in boot.scr  /boot/
             sync
             umount-all
             exit
@@ -119,7 +115,7 @@ jobs:
 
           ls -lh "$IMG"
 
-      - name: Upload SD‑Card artifact
+      - name: Upload SD-Card artifact
         uses: actions/upload-artifact@v4
         with:
           name: sdcard-${{ github.sha }}
@@ -144,12 +140,12 @@ jobs:
           name: Release ${{ github.ref_name }}
           body: |
             - **Container**: ghcr.io/${{ github.repository_owner }}/alpine-rg353vs:${{ github.sha }}
-            - **SD‑Card image**: alpine-rg353vs-${{ github.ref_name }}.img
+            - **SD-Card image**: alpine-rg353vs-${{ github.ref_name }}.img
             - **Container tarball**: alpine-rg353vs-${{ github.ref_name }}.tar.gz
           draft: false
           prerelease: false
 
-      - name: Upload SD‑Card release asset
+      - name: Upload SD-Card release asset
         uses: actions/upload-release-asset@v4
         with:
           upload_url: ${{ steps.release.outputs.upload_url }}
