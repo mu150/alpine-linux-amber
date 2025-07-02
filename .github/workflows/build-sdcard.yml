@@ -9,14 +9,13 @@ on:
   workflow_dispatch:
 
 jobs:
+  # 1️⃣ Build & Push the Docker Image
   build-and-push:
-    name: Build & Push Container
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
       id-token: write
-
     steps:
       - uses: actions/checkout@v4
 
@@ -61,62 +60,61 @@ jobs:
           name: container-${{ github.sha }}
           path: alpine-rg353vs-${{ github.sha }}.tar.gz
 
+  # 2️⃣ Build the SD‑Card Image by byte-offset mounting
   make-sd-image:
-    name: Build SD‑Card Image
     needs: build-and-push
     runs-on: ubuntu-latest
-
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install dependencies
+      - name: Install host dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y wget parted dosfstools e2fsprogs kmod u-boot-tools
 
-      - name: Build SD‑Card Image
+      - name: Build SD‑Card Image (byte-offset mounts)
         run: |
           set -euxo pipefail
+
           SHA=${{ github.sha }}
           IMG=alpine-rg353vs-${SHA}.img
           UBOOT=uboot.img
-          MINIROOT=http://dl-cdn.alpinelinux.org/alpine/v3.19/releases/aarch64/alpine-minirootfs-3.19.0-aarch64.tar.gz
+          MINIROOT="http://dl-cdn.alpinelinux.org/alpine/v3.19/releases/aarch64/alpine-minirootfs-3.19.0-aarch64.tar.gz"
 
-          # 1) Download Alpine rootfs
+          # Download Alpine rootfs
           wget -O rootfs.tar.gz "$MINIROOT"
 
-          # 2) Create blank 1 GiB image file
+          # 1) Create blank 1 GiB image
           truncate -s 1G "$IMG"
 
-          # 3) Partition by sector (512-byte) units:
-          #    - Partition 1: 2048–131071 (1 MiB–64 MiB)
-          #    - Partition 2: 131072–100% (64 MiB–end)
+          # 2) Partition in-sector units (512 B):
+          #    Part1: 2048–131071 (1 MiB–64 MiB), FAT32
+          #    Part2: 131072–100%    (64 MiB–end), EXT4
           sudo parted --script "$IMG" unit s \
             mklabel msdos \
             mkpart primary fat32 2048 131071 \
             mkpart primary ext4  131072 100% \
             set 1 boot on
 
-          # 4) Attach briefly to format
-          LOOP=$(sudo losetup --show -fP "$IMG")
-          BOOT_DEV="${LOOP}p1"
-          ROOT_DEV="${LOOP}p2"
+          # 3) Format each partition by mounting via loop+offset
+          BOOT_OFFSET=$((2048 * 512))     # = 1MiB
+          ROOT_OFFSET=$((131072 * 512))   # = 64MiB
 
-          sudo mkfs.vfat -F 32 -n BOOT "$BOOT_DEV"
-          sudo mkfs.ext4 -L ROOTFS "$ROOT_DEV"
+          # Format FAT32 boot
+          sudo mount -o loop,offset=$BOOT_OFFSET -t vfat "$IMG" /mnt || sudo mkdir -p /mnt
+          sudo umount /mnt || true
+          sudo mkfs.vfat -F 32 -n BOOT -o offset=$BOOT_OFFSET "$IMG"
 
-          sudo losetup -d "$LOOP"
+          # Format EXT4 root
+          sudo mount -o loop,offset=$ROOT_OFFSET -t ext4 "$IMG" /mnt
+          sudo umount /mnt || true
+          sudo mkfs.ext4 -L ROOTFS -F -O ^metadata_csum,^64bit -q -E offset=$ROOT_OFFSET "$IMG"
 
-          # 5) Flash U‑Boot SPL+U-Boot at 8 KiB offset
-          dd if="$UBOOT" of="$IMG" bs=1K seek=8 conv=fsync
+          # 4) Flash U‑Boot at 8KiB
+          sudo dd if="$UBOOT" of="$IMG" bs=1K seek=8 conv=fsync
 
-          # 6) Mount by byte‐offset and populate
+          # 5) Mount by offset and populate
           mkdir -p mnt/boot mnt/root
-
-          # offsets in bytes:
-          BOOT_OFFSET=$((2048 * 512))      # 1 MiB
-          ROOT_OFFSET=$((131072 * 512))    # 64 MiB
-
           sudo mount -o loop,offset=$BOOT_OFFSET -t vfat "$IMG" mnt/boot
           sudo mount -o loop,offset=$ROOT_OFFSET -t ext4 "$IMG" mnt/root
 
@@ -125,7 +123,7 @@ jobs:
           sudo cp *.dtb      mnt/boot/
           sudo cp boot.scr   mnt/boot/
 
-          # 7) Cleanup
+          # 6) Cleanup
           sync
           sudo umount mnt/boot mnt/root
 
@@ -137,12 +135,11 @@ jobs:
           name: sdcard-${{ github.sha }}
           path: alpine-rg353vs-${{ github.sha }}.img
 
+  # 3️⃣ On tags, create a Release and attach both artifacts
   package-release:
-    name: Create Release & Attach Assets
     needs: [build-and-push, make-sd-image]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
-
     steps:
       - name: Download artifacts
         uses: actions/download-artifact@v4
