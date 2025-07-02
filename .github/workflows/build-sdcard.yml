@@ -73,49 +73,40 @@ jobs:
           sudo apt-get install -y \
             wget libguestfs-tools
 
-      - name: Build SD‑Card Image with guestfish
-        run: |
-          set -euxo pipefail
-          SHA=${{ github.sha }}
-          IMG=alpine-rg353vs-${SHA}.img
-          UBOOT=uboot.img
-          ROOTFS_TAR=http://dl-cdn.alpinelinux.org/alpine/v3.19/releases/aarch64/alpine-minirootfs-3.19.0-aarch64.tar.gz
+           - name: Build SD‑Card Image with guestfish
+             run: |
+               set -euxo pipefail
+               SHA=${{ github.sha }}
+               IMG=alpine-rg353vs-${SHA}.img
+               UBOOT=uboot.img
+               ROOTFS_TAR=http://dl-cdn.alpinelinux.org/alpine/v3.19/releases/aarch64/alpine-minirootfs-3.19.0-aarch64.tar.gz
+      
+               wget -O rootfs.tar.gz "$ROOTFS_TAR"
+               truncate -s 1G "$IMG"
+      
+               # Correct guestfish invocation: open image as raw disk, then run commands
+               sudo guestfish --format=raw -a "$IMG" <<EOF
+run
+part-init /dev/sda mbr
+part-add   /dev/sda primary fat32 1MiB 64MiB
+part-add   /dev/sda primary ext4 64MiB 100%
+part-set-bootable /dev/sda 1 true
+mkfs vfat /dev/sda1
+mkfs ext4 /dev/sda2
+dd if=$UBOOT of=/dev/sda bs=512 seek=16
+mount /dev/sda2 /
+mkdir /boot
+mount /dev/sda1 /boot
+tar-in rootfs.tar.gz /
+copy-in zImage    /boot/
+copy-in *.dtb     /boot/
+copy-in boot.scr  /boot/
+sync
+umount-all
+EOF
 
-          # Fetch the Alpine aarch64 minirootfs
-          wget -O rootfs.tar.gz "$ROOTFS_TAR"
+              ls -lh "$IMG"
 
-          # Create an empty 1 GiB disk image
-          truncate -s 1G "$IMG"
-
-          # Use guestfish to partition, format, install U‑Boot, and inject files
-          sudo guestfish <<-EOF
-            set -a $IMG
-            run
-            # Partition: DOS, 1MiB–64MiB FAT32, rest ext4
-            part-init /dev/sda mbr
-            part-add   /dev/sda primary fat32 1MiB 64MiB
-            part-add   /dev/sda primary ext4 64MiB 100%
-            # Format filesystems
-            mkfs vfat /dev/sda1
-            mkfs ext4 /dev/sda2
-            # Flash U‑Boot at 8 KiB
-            # (guestfish 'dd' op takes offset in bytes)
-            dd if=$UBOOT of=/dev/sda bs=1 seek=8
-            # Mount and copy
-            mount /dev/sda2 /
-            mkdir /boot
-            mount /dev/sda1 /boot
-            # Inject rootfs and boot files
-            tar-in rootfs.tar.gz /
-            copy-in zImage       /boot/
-            copy-in *.dtb        /boot/
-            copy-in boot.scr     /boot/
-            sync
-            umount-all
-            exit
-          EOF
-
-          ls -lh "$IMG"
 
       - name: Upload SD‑Card artifact
         uses: actions/upload-artifact@v4
