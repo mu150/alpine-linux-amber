@@ -1,175 +1,172 @@
-name: Build & Release Alpine RG353VS SD‑Card Image
+name: Build & Release Alpine RG353VS SD-Card Image
 
 on:
-push:
-branches:
-\- main
-tags:
-\- 'v\*'
-workflow\_dispatch:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+  workflow_dispatch:
 
 jobs:
-build-and-push:
-runs-on: ubuntu-latest
-permissions:
-contents: read
-packages: write
-id-token: write
-steps:
-\- uses: actions/checkout\@v4
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
 
-```
-  - name: Setup QEMU
-    uses: docker/setup-qemu-action@v3
-    with:
-      platforms: arm64
+    steps:
+      - uses: actions/checkout@v4
 
-  - name: Setup Buildx
-    uses: docker/setup-buildx-action@v3
+      - name: Setup QEMU
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
 
-  - name: Login to GHCR
-    uses: docker/login-action@v2
-    with:
-      registry: ghcr.io
-      username: ${{ github.actor }}
-      password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Setup Buildx
+        uses: docker/setup-buildx-action@v3
 
-  - name: Build & Push Image
-    id: build
-    uses: docker/build-push-action@v4
-    with:
-      context: .
-      file: Dockerfile
-      platforms: |
-        linux/amd64
-        linux/arm64
-      push: true
-      tags: |
-        ghcr.io/${{ github.repository_owner }}/alpine-rg353vs:latest
-        ghcr.io/${{ github.repository_owner }}/alpine-rg353vs:${{ github.sha }}
+      - name: Login to GHCR
+        uses: docker/login-action@v2
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
-  - name: Save container tarball
-    run: |
-      IMAGE=ghcr.io/${{ github.repository_owner }}/alpine-rg353vs:${{ github.sha }}
-      docker pull $IMAGE
-      docker save $IMAGE | gzip > alpine-rg353vs-${{ github.sha }}.tar.gz
+      - name: Build & Push Image
+        id: build
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          file: Dockerfile
+          platforms: |
+            linux/amd64
+            linux/arm64
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/alpine-rg353vs:latest
+            ghcr.io/${{ github.repository_owner }}/alpine-rg353vs:${{ github.sha }}
 
-  - name: Upload container artifact
-    uses: actions/upload-artifact@v4
-    with:
-      name: container-${{ github.sha }}
-      path: alpine-rg353vs-${{ github.sha }}.tar.gz
-```
+      - name: Save container tarball
+        run: |
+          IMAGE=ghcr.io/${{ github.repository_owner }}/alpine-rg353vs:${{ github.sha }}
+          docker pull $IMAGE
+          docker save $IMAGE | gzip > alpine-rg353vs-${{ github.sha }}.tar.gz
 
-make-sd-image:
-needs: build-and-push
-runs-on: ubuntu-latest
-steps:
-\- uses: actions/checkout\@v4
+      - name: Upload container artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: container-${{ github.sha }}
+          path: alpine-rg353vs-${{ github.sha }}.tar.gz
 
-```
-  - name: Install dependencies
-    run: |
-      sudo apt-get update
-      sudo apt-get install -y \
-        wget parted dosfstools e2fsprogs kmod u-boot-tools kpartx
+  make-sd-image:
+    needs: build-and-push
+    runs-on: ubuntu-latest
 
-  - name: Build SD‑Card Image
-    run: |
-      set -euxo pipefail
-      SHA=${{ github.sha }}
-      IMG=alpine-rg353vs-${SHA}.img
-      UBOOT=uboot.img
-      MINIROOT=http://dl-cdn.alpinelinux.org/alpine/v3.19/releases/aarch64/alpine-minirootfs-3.19.0-aarch64.tar.gz
+    steps:
+      - uses: actions/checkout@v4
 
-      # download rootfs
-      wget -O rootfs.tar.gz $MINIROOT
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            wget parted dosfstools e2fsprogs kmod u-boot-tools kpartx
 
-      # create blank image
-      truncate -s 1G $IMG
+      - name: Build SD-Card Image
+        run: |
+          set -euxo pipefail
+          SHA=${{ github.sha }}
+          IMG=alpine-rg353vs-${SHA}.img
+          UBOOT=uboot.img
+          MINIROOT=http://dl-cdn.alpinelinux.org/alpine/v3.19/releases/aarch64/alpine-minirootfs-3.19.0-aarch64.tar.gz
 
-      # partition image: 1MiB–64MiB FAT, 64MiB–end EXT4
-      parted --script $IMG \
-        mklabel msdos \
-        mkpart primary fat32 1MiB 64MiB \
-        mkpart primary ext4  64MiB 100%
+          # download rootfs
+          wget -O rootfs.tar.gz $MINIROOT
 
-      # map with kpartx
-      LOOP=$(sudo losetup --show -f $IMG)
-      sudo partprobe $LOOP
-      sudo kpartx -av $LOOP
+          # create blank image
+          truncate -s 1G $IMG
 
-      BOOT_DEV=/dev/mapper/$(basename $LOOP)p1
-      ROOT_DEV=/dev/mapper/$(basename $LOOP)p2
+          # partition image: 1MiB–64MiB FAT, 64MiB–end EXT4
+          parted --script $IMG \
+            mklabel msdos \
+            mkpart primary fat32 1MiB 64MiB \
+            mkpart primary ext4  64MiB 100%
 
-      # format
-      sudo mkfs.vfat -n BOOT $BOOT_DEV
-      sudo mkfs.ext4 -L ROOTFS $ROOT_DEV
+          # map with kpartx
+          LOOP=$(sudo losetup --show -f $IMG)
+          sudo partprobe $LOOP
+          sudo kpartx -av $LOOP
 
-      # install u-boot at 8KiB
-      sudo dd if=$UBOOT of=$LOOP bs=1K seek=8 conv=fsync
+          BOOT_DEV=/dev/mapper/$(basename $LOOP)p1
+          ROOT_DEV=/dev/mapper/$(basename $LOOP)p2
 
-      # mount and populate
-      mkdir -p mnt/boot mnt/root
-      sudo mount -t vfat $BOOT_DEV mnt/boot
-      sudo mount -t ext4 $ROOT_DEV mnt/root
+          # format
+          sudo mkfs.vfat -n BOOT $BOOT_DEV
+          sudo mkfs.ext4 -L ROOTFS $ROOT_DEV
 
-      # extract rootfs and copy boot files
-      sudo tar xzf rootfs.tar.gz -C mnt/root
-      sudo cp zImage mnt/boot/
-      sudo cp *.dtb mnt/boot/
-      sudo cp boot.scr mnt/boot/
+          # install u-boot at 8KiB
+          sudo dd if=$UBOOT of=$LOOP bs=1K seek=8 conv=fsync
 
-      # cleanup
-      sync
-      sudo umount mnt/boot mnt/root
-      sudo kpartx -dv $LOOP
-      sudo losetup -d $LOOP
+          # mount and populate
+          mkdir -p mnt/boot mnt/root
+          sudo mount -t vfat $BOOT_DEV mnt/boot
+          sudo mount -t ext4 $ROOT_DEV mnt/root
 
-      ls -lh $IMG
+          sudo tar xzf rootfs.tar.gz -C mnt/root
+          # copy kernel, dtb, boot.scr
+          sudo cp zImage mnt/boot/
+          sudo cp *.dtb mnt/boot/
+          sudo cp boot.scr mnt/boot/
 
-  - name: Upload SD‑Card artifact
-    uses: actions/upload-artifact@v4
-    with:
-      name: sdcard-${{ github.sha }}
-      path: alpine-rg353vs-${{ github.sha }}.img
-```
+          # cleanup
+          sync
+          sudo umount mnt/boot mnt/root
+          sudo kpartx -dv $LOOP
+          sudo losetup -d $LOOP
 
-package-release:
-needs: \[build-and-push, make-sd-image]
-if: startsWith(github.ref, 'refs/tags/v')
-runs-on: ubuntu-latest
-steps:
-\- name: Download artifacts
-uses: actions/download-artifact\@v4
-with:
-path: artifacts
+          ls -lh $IMG
 
-```
-  - name: Create GitHub Release
-    id: release
-    uses: ncipollo/release-action@v1
-    with:
-      tag: ${{ github.ref_name }}
-      name: Release ${{ github.ref_name }}
-      body: |
-        - Container: ghcr.io/${{ github.repository_owner }}/alpine-rg353vs:${{ github.sha }}
-        - SD‑Card image: alpine-rg353vs-${{ github.ref_name }}.img
-        - Container tarball: alpine-rg353vs-${{ github.ref_name }}.tar.gz
+      - name: Upload SD-Card artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sdcard-${{ github.sha }}
+          path: alpine-rg353vs-${{ github.sha }}.img
 
-  - name: Upload SD‑Card asset
-    uses: actions/upload-release-asset@v4
-    with:
-      upload_url: ${{ steps.release.outputs.upload_url }}
-      asset_path: artifacts/alpine-rg353vs-${{ github.sha }}.img
-      asset_name: alpine-rg353vs-${{ github.ref_name }}.img
-      asset_content_type: application/octet-stream
+  package-release:
+    needs: [build-and-push, make-sd-image]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
 
-  - name: Upload container asset
-    uses: actions/upload-release-asset@v4
-    with:
-      upload_url: ${{ steps.release.outputs.upload_url }}
-      asset_path: artifacts/alpine-rg353vs-${{ github.sha }}.tar.gz
-      asset_name: alpine-rg353vs-${{ github.ref_name }}.tar.gz
-      asset_content_type: application/gzip
-```
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create GitHub Release
+        id: release
+        uses: ncipollo/release-action@v1
+        with:
+          tag: ${{ github.ref_name }}
+          name: Release ${{ github.ref_name }}
+          body: |
+            - Container: ghcr.io/${{ github.repository_owner }}/alpine-rg353vs:${{ github.sha }}
+            - SD-Card image: alpine-rg353vs-${{ github.ref_name }}.img
+            - Container tarball: alpine-rg353vs-${{ github.ref_name }}.tar.gz
+
+      - name: Upload SD-Card asset
+        uses: actions/upload-release-asset@v4
+        with:
+          upload_url: ${{ steps.release.outputs.upload_url }}
+          asset_path: artifacts/alpine-rg353vs-${{ github.sha }}.img
+          asset_name: alpine-rg353vs-${{ github.ref_name }}.img
+          asset_content_type: application/octet-stream
+
+      - name: Upload container asset
+        uses: actions/upload-release-asset@v4
+        with:
+          upload_url: ${{ steps.release.outputs.upload_url }}
+          asset_path: artifacts/alpine-rg353vs-${{ github.sha }}.tar.gz
+          asset_name: alpine-rg353vs-${{ github.ref_name }}.tar.gz
+          asset_content_type: application/gzip
