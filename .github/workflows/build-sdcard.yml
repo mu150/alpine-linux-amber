@@ -2,31 +2,33 @@ name: Build & Release Alpine RG353VS SD‑Card Image (guestfish)
 
 on:
   push:
-    branches: [ main ]
-    tags: [ 'v*' ]
+    branches:
+      - main
+    tags:
+      - 'v*'
   workflow_dispatch:
 
 jobs:
-  # 1️⃣ Build & push the container image
   build-and-push:
+    name: Build & Push Container
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
       id-token: write
-
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-      - name: Setup QEMU
+      - name: Setup QEMU emulation
         uses: docker/setup-qemu-action@v3
         with:
           platforms: arm64
 
-      - name: Setup Buildx
+      - name: Setup Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Login to GHCR
+      - name: Login to GitHub Container Registry
         uses: docker/login-action@v2
         with:
           registry: ghcr.io
@@ -59,54 +61,57 @@ jobs:
           name: container-${{ github.sha }}
           path: alpine-rg353vs-${{ github.sha }}.tar.gz
 
-  # 2️⃣ Build the SD‑Card image using guestfish
   make-sd-image:
+    name: Build SD‑Card Image with guestfish
     needs: build-and-push
     runs-on: ubuntu-latest
-
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-      - name: Install host dependencies
+      - name: Install guestfish
         run: |
           sudo apt-get update
-          sudo apt-get install -y \
-            wget libguestfs-tools
+          sudo apt-get install -y wget libguestfs-tools
 
-           - name: Build SD‑Card Image with guestfish
-             run: |
-               set -euxo pipefail
-               SHA=${{ github.sha }}
-               IMG=alpine-rg353vs-${SHA}.img
-               UBOOT=uboot.img
-               ROOTFS_TAR=http://dl-cdn.alpinelinux.org/alpine/v3.19/releases/aarch64/alpine-minirootfs-3.19.0-aarch64.tar.gz
-      
-               wget -O rootfs.tar.gz "$ROOTFS_TAR"
-               truncate -s 1G "$IMG"
-      
-               # Correct guestfish invocation: open image as raw disk, then run commands
-               sudo guestfish --format=raw -a "$IMG" <<EOF
-run
-part-init /dev/sda mbr
-part-add   /dev/sda primary fat32 1MiB 64MiB
-part-add   /dev/sda primary ext4 64MiB 100%
-part-set-bootable /dev/sda 1 true
-mkfs vfat /dev/sda1
-mkfs ext4 /dev/sda2
-dd if=$UBOOT of=/dev/sda bs=512 seek=16
-mount /dev/sda2 /
-mkdir /boot
-mount /dev/sda1 /boot
-tar-in rootfs.tar.gz /
-copy-in zImage    /boot/
-copy-in *.dtb     /boot/
-copy-in boot.scr  /boot/
-sync
-umount-all
-EOF
+      - name: Build SD‑Card Image
+        run: |
+          set -euxo pipefail
+          SHA=${{ github.sha }}
+          IMG=alpine-rg353vs-${SHA}.img
+          UBOOT=uboot.img
+          ROOTFS_TAR="http://dl-cdn.alpinelinux.org/alpine/v3.19/releases/aarch64/alpine-minirootfs-3.19.0-aarch64.tar.gz"
 
-               ls -lh "$IMG"
+          # Download Alpine rootfs
+          wget -O rootfs.tar.gz "$ROOTFS_TAR"
 
+          # Create empty 1GiB image
+          truncate -s 1G "$IMG"
+
+          # Use guestfish to partition, format, flash U-Boot, and inject files
+          sudo guestfish --format=raw -a "$IMG" <<-'EOF'
+            run
+            part-init /dev/sda mbr
+            part-add /dev/sda primary fat32 1MiB 64MiB
+            part-add /dev/sda primary ext4 64MiB 100%
+            part-set-bootable /dev/sda 1 true
+            mkfs vfat /dev/sda1
+            mkfs ext4 /dev/sda2
+            # write U-Boot at 8KiB offset: 8KiB/512B = 16 sectors
+            dd if=$UBOOT of=/dev/sda bs=512 seek=16
+            mount /dev/sda2 /
+            mkdir /boot
+            mount /dev/sda1 /boot
+            tar-in rootfs.tar.gz /
+            copy-in zImage /boot/
+            copy-in *.dtb /boot/
+            copy-in boot.scr /boot/
+            sync
+            umount-all
+            exit
+          EOF
+
+          ls -lh "$IMG"
 
       - name: Upload SD‑Card artifact
         uses: actions/upload-artifact@v4
@@ -114,8 +119,8 @@ EOF
           name: sdcard-${{ github.sha }}
           path: alpine-rg353vs-${{ github.sha }}.img
 
-  # 3️⃣ On tag pushes, make a GitHub Release
   package-release:
+    name: Create GitHub Release & Attach Assets
     needs: [build-and-push, make-sd-image]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
