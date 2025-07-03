@@ -92,10 +92,10 @@ jobs:
 
           # 2) partition it directly
           LOOP=$(sudo losetup --show -f "$IMG")
-          sudo parted --script "$LOOP" \
+          sudo parted --script "$LOOP" unit MiB \
             mklabel msdos \
-            mkpart primary fat32 1MiB 64MiB \
-            mkpart primary ext4  64MiB 100% \
+            mkpart primary fat32 1 64 \
+            mkpart primary ext4  64 100% \
             set 1 boot on
           sudo partprobe "$LOOP"
           sudo losetup -d "$LOOP"
