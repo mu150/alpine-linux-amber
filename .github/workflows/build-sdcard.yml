@@ -88,8 +88,8 @@ jobs:
           IMG=alpine-rg353vs-${SHA}.img
 
           # 1) Fully allocate the file & flash U‑Boot
-          dd if=/dev/zero of="$IMG" bs=1M count=1024 status=none
           dd if=uboot.img of="$IMG" bs=1K seek=8 conv=fsync
+          truncate -s 1G "$IMG"
           
           # 2) Partition the image file itself
           sudo parted --script "$IMG" mklabel msdos unit s \
