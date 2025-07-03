@@ -106,9 +106,9 @@ jobs:
             mkdir /boot/dtb
             mkdir /boot/extlinux
             tar-in rootfs.tar /
-            upload /github/workspace/boot/linux /boot/linux
-            upload /github/workspace/dtb/rk3566-rg353v.dtb /boot/dtb/rk3566.dtb
-            upload /github/workspace/extlinux/extlinux.conf  /boot/extlinux/extlinux.conf
+            copy-in boot/linux /boot/linux
+            copy-in dtb/rk3566-rg353v.dtb /boot/dtb/rk3566.dtb
+            copy-in extlinux/extlinux.conf  /boot/extlinux/extlinux.conf
             sync
             umount-all
             exit
