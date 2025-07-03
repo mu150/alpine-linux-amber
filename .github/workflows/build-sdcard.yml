@@ -86,10 +86,10 @@ jobs:
           SHA=${{ github.sha }}
           IMG=alpine-rg353vs-${SHA}.img
 
-          # Create blank 1GiB image
+          # create blank 1GiB image
           truncate -s 1G "$IMG"
 
-          # Partition, format, and inject files via guestfish
+          # partition, format, and inject files via guestfish
           sudo guestfish --format=raw -a "$IMG" <<-'EOF'
             run
             part-init /dev/sda mbr
@@ -101,8 +101,8 @@ jobs:
             mount /dev/sda2 /
             mkdir /boot
             mount /dev/sda1 /boot
-            # Inject compressed rootfs without trailing slash
-            tar-in -z rootfs.tar.gz
+            # correct tar-in usage: file, dest, then -z
+            tar-in rootfs.tar.gz / -z
             copy-in zImage    /boot/
             copy-in *.dtb     /boot/
             copy-in boot.scr  /boot/
