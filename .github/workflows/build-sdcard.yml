@@ -104,9 +104,9 @@ jobs:
             mkdir /boot
             mount /dev/sda1 /boot
             tar-in rootfs.tar /
-            copy-in zImage    /boot/
-            copy-in *.dtb     /boot/
-            copy-in boot.scr  /boot/
+            upload zImage    /boot/zImage
+            upload *.dtb     /boot/
+            upload boot.scr  /boot/boot.scr
             sync
             umount-all
             exit
