@@ -80,7 +80,6 @@ jobs:
           cp boot/linux         linux
           cp dtb/rk3566-rg353v.dtb rk3566.dtb
           cp extlinux/extlinux.conf extlinux.conf
-          cp initrd.gz initrd.gz
 
       - name: Build SD‑card image
         run: |
