@@ -1,4 +1,4 @@
-name: Build & Release Alpine RG353VS SD‑Card Image
+name: Build & Release Alpine RG353VS SD-Card Image
 
 on:
   push:
@@ -36,7 +36,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build & push multi‑arch image
+      - name: Build & push multi-arch image
         id: build
         uses: docker/build-push-action@v4
         with:
@@ -63,22 +63,24 @@ jobs:
           path: alpine-rg353vs-${{ github.sha }}.tar.gz
 
   make-sd-image:
-    name: Build SD‑Card Image
+    name: Build SD-Card Image
     needs: build-and-push
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Install guestfish
+      - name: Install tools
         run: |
           sudo apt-get update
           sudo apt-get install -y wget libguestfs-tools
 
-      - name: Download Alpine rootfs
+      - name: Download and decompress Alpine rootfs
         run: |
           wget -O rootfs.tar.gz \
             http://dl-cdn.alpinelinux.org/alpine/v3.19/releases/aarch64/alpine-minirootfs-3.19.0-aarch64.tar.gz
+          gunzip -c rootfs.tar.gz > rootfs.tar
 
       - name: Create & populate image with guestfish
         run: |
@@ -86,10 +88,10 @@ jobs:
           SHA=${{ github.sha }}
           IMG=alpine-rg353vs-${SHA}.img
 
-          # create blank 1GiB image
+          # create blank 1 GiB image
           truncate -s 1G "$IMG"
 
-          # partition, format, and inject files via guestfish
+          # partition, format, and inject via guestfish
           sudo guestfish --format=raw -a "$IMG" <<-'EOF'
             run
             part-init /dev/sda mbr
@@ -101,8 +103,7 @@ jobs:
             mount /dev/sda2 /
             mkdir /boot
             mount /dev/sda1 /boot
-            # correct tar-in usage: file, dest, then -z
-            tar-in rootfs.tar.gz / -z
+            tar-in rootfs.tar /
             copy-in zImage    /boot/
             copy-in *.dtb     /boot/
             copy-in boot.scr  /boot/
@@ -111,11 +112,11 @@ jobs:
             exit
           EOF
 
-      - name: Flash U‑Boot via dd
+      - name: Flash U-Boot via dd
         run: |
           dd if=uboot.img of=alpine-rg353vs-${{ github.sha }}.img bs=1K seek=8 conv=fsync
 
-      - name: Upload SD‑Card artifact
+      - name: Upload SD-Card artifact
         uses: actions/upload-artifact@v4
         with:
           name: sdcard-${{ github.sha }}
@@ -126,6 +127,7 @@ jobs:
     needs: [build-and-push, make-sd-image]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
+
     steps:
       - name: Download artifacts
         uses: actions/download-artifact@v4
@@ -140,12 +142,12 @@ jobs:
           name: Release ${{ github.ref_name }}
           body: |
             - **Container**: ghcr.io/${{ github.repository_owner }}/alpine-rg353vs:${{ github.sha }}
-            - **SD‑Card image**: alpine-rg353vs-${{ github.ref_name }}.img
+            - **SD-Card image**: alpine-rg353vs-${{ github.ref_name }}.img
             - **Container tarball**: alpine-rg353vs-${{ github.ref_name }}.tar.gz
           draft: false
           prerelease: false
 
-      - name: Upload SD‑Card release asset
+      - name: Upload SD-Card release asset
         uses: actions/upload-release-asset@v4
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
