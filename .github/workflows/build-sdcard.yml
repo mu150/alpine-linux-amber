@@ -63,66 +63,69 @@ jobs:
           path: alpine-rg353vs-${{ github.sha }}.tar.gz
 
   make-sd-image:
-    name: Build SD-Card Image
-    needs: build-and-push
     runs-on: ubuntu-latest
-
+    needs: build-and-push
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Install tools
+      - name: Install host deps
         run: |
           sudo apt-get update
-          sudo apt-get install -y wget libguestfs-tools
+          sudo apt-get install -y wget parted dosfstools e2fsprogs kmod u-boot-tools
 
-      - name: Download and decompress Alpine rootfs
+      - name: Download rootfs & prepare boot files
         run: |
-          wget -O rootfs.tar.gz \
-            http://dl-cdn.alpinelinux.org/alpine/v3.19/releases/aarch64/alpine-minirootfs-3.19.0-aarch64.tar.gz
-          gunzip -c rootfs.tar.gz > rootfs.tar
-          
-      - name: Create & populate image with guestfish
+          wget -O rootfs.tar.gz http://dl-cdn.alpinelinux.org/alpine/v3.19/…/alpine-minirootfs…tar.gz
+          # stage your files into CWD:
+          cp linux         zImage
+          cp dtb/rk3566-rg353v.dtb rk3566.dtb
+          cp extlinux/extlinux.conf extlinux.conf
+
+      - name: Build SD‑card image
         run: |
           set -euxo pipefail
           SHA=${{ github.sha }}
           IMG=alpine-rg353vs-${SHA}.img
 
-          # create blank 1 GiB image
+          # 1) create blank 1 GiB file
           truncate -s 1G "$IMG"
 
-          # partition, format, and inject via guestfish
-          sudo guestfish --format=raw -a "$IMG" <<-'EOF'
-            run
-            part-init /dev/sda mbr
-            part-add  /dev/sda p 2048 131071
-            part-add  /dev/sda p 131072 -1
-            part-set-bootable /dev/sda 1 true
-            mkfs vfat /dev/sda1
-            mkfs ext4 /dev/sda2
-            mount /dev/sda2 /
-            mkdir /boot
-            mount /dev/sda1 /boot
-            mkdir /boot/dtb
-            mkdir /boot/extlinux
-            tar-in rootfs.tar /
-            copy-in boot/linux /boot
-            copy-in dtb/rk3566-rg353v.dtb /boot/dtb
-            copy-in extlinux/extlinux.conf  /boot/extlinux
-            sync
-            umount-all
-            exit
-          EOF
+          # 2) partition it directly
+          LOOP=$(sudo losetup --show -fP "$IMG")
+          sudo parted --script "$LOOP" \
+            mklabel msdos \
+            mkpart primary fat32 1MiB 64MiB \
+            mkpart primary ext4  64MiB 100%
 
-      - name: Flash U-Boot via dd
-        run: |
-          dd if=uboot.img of=alpine-rg353vs-${{ github.sha }}.img bs=1K seek=8 conv=fsync
+          # 3) format partitions
+          sudo mkfs.vfat -n BOOT "${LOOP}p1"
+          sudo mkfs.ext4 -L ROOTFS "${LOOP}p2"
 
-      - name: Upload SD-Card artifact
+          # 4) flash U‑Boot at 8 KiB
+          sudo dd if=uboot.img of="$LOOP" bs=1K seek=8 conv=fsync
+
+          # 5) mount & populate
+          mkdir -p mnt/boot mnt/root
+          sudo mount "${LOOP}p1" mnt/boot
+          sudo mount "${LOOP}p2" mnt/root
+
+          sudo tar xzf rootfs.tar.gz -C mnt/root
+          sudo cp zImage            mnt/boot/
+          sudo cp rk3566.dtb        mnt/boot/
+          sudo mkdir -p mnt/boot/extlinux
+          sudo cp extlinux.conf     mnt/boot/extlinux/extlinux.conf
+
+          # 6) cleanup
+          sync
+          sudo umount mnt/boot mnt/root
+          sudo losetup -d "$LOOP"
+
+      - name: Upload SD‑Card artifact
         uses: actions/upload-artifact@v4
         with:
           name: sdcard-${{ github.sha }}
           path: alpine-rg353vs-${{ github.sha }}.img
+
 
   package-release:
     name: Create GitHub Release & Attach Assets
