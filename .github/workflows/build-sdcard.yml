@@ -104,9 +104,9 @@ jobs:
             mkdir /boot
             mount /dev/sda1 /boot
             tar-in rootfs.tar /
-            upload zImage    /boot/zImage
-            upload *.dtb     /boot/
-            upload boot.scr  /boot/boot.scr
+            upload /github/workspace/zImage    /boot/zImage
+            upload /github/workspace/*.dtb     /boot/
+            upload /github/workspace/boot.scr  /boot/boot.scr
             sync
             umount-all
             exit
