@@ -87,37 +87,36 @@ jobs:
           SHA=${{ github.sha }}
           IMG=alpine-rg353vs-${SHA}.img
 
-          # 1) create blank 1 GiB file
+          # 1) create & flash U‑Boot
           truncate -s 1G "$IMG"
-          # 4) flash U‑Boot at 8 KiB
           dd if=uboot.img of="$IMG" bs=1K seek=8 conv=fsync
 
-          # 2) partition it directly
+          # 2) partition in sectors
           LOOP=$(sudo losetup --show -f "$IMG")
-          sudo parted --script "$LOOP" unit MiB \
-            mklabel msdos \
-            mkpart primary fat32 1 64 \
-            mkpart primary ext4  64 100% \
-            set 1 boot on
+          sudo parted --script "$LOOP" mklabel msdos
+          sudo parted --script "$LOOP" unit s mkpart primary fat32 2048 131071
+          sudo parted --script "$LOOP" unit s mkpart primary ext4 131072 100%
+          sudo parted --script "$LOOP" set 1 boot on
           sudo partprobe "$LOOP"
           sudo losetup -d "$LOOP"
           LOOP=$(sudo losetup --show -fP "$IMG")
-          # 3) format partitions
+
+          # 3) format
           sudo mkfs.vfat -F 32 -n BOOT "${LOOP}p1"
           sudo mkfs.ext4 -L ROOTFS "${LOOP}p2"
 
-          # 5) mount & populate
+          # 4) mount & populate
           mkdir -p mnt/boot mnt/root
           sudo mount "${LOOP}p1" mnt/boot
           sudo mount "${LOOP}p2" mnt/root
 
           sudo tar xzf rootfs.tar.gz -C mnt/root
-          sudo cp linux            mnt/boot/
-          sudo cp rk3566.dtb        mnt/boot/
+          sudo cp linux          mnt/boot/
+          sudo cp rk3566.dtb     mnt/boot/
           sudo mkdir -p mnt/boot/extlinux
-          sudo cp extlinux.conf     mnt/boot/extlinux/extlinux.conf
+          sudo cp extlinux.conf  mnt/boot/extlinux/extlinux.conf
 
-          # 6) cleanup
+          # 5) cleanup
           sync
           sudo umount mnt/boot mnt/root
           sudo losetup -d "$LOOP"
