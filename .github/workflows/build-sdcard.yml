@@ -75,7 +75,7 @@ jobs:
 
       - name: Download rootfs & prepare boot files
         run: |
-          wget -O rootfs.tar.gz http://dl-cdn.alpinelinux.org/alpine/v3.19/…/alpine-minirootfs…tar.gz
+          wget -O rootfs.tar.gz http://dl-cdn.alpinelinux.org/alpine/latest-stable/releases/aarch64/alpine-minirootfs-3.22.0-aarch64.tar.gz
           # stage your files into CWD:
           cp linux         zImage
           cp dtb/rk3566-rg353v.dtb rk3566.dtb
