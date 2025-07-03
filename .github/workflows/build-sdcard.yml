@@ -82,13 +82,6 @@ jobs:
             http://dl-cdn.alpinelinux.org/alpine/v3.19/releases/aarch64/alpine-minirootfs-3.19.0-aarch64.tar.gz
           gunzip -c rootfs.tar.gz > rootfs.tar
           
-      - name: Stage kernel & DTB for guestfish
-        run: |
-          # adjust these paths to wherever your build actually puts them
-          cp build/zImage . 
-          cp build/*.dtb .
-          cp boot.scr .
-          
       - name: Create & populate image with guestfish
         run: |
           set -euxo pipefail
@@ -110,10 +103,12 @@ jobs:
             mount /dev/sda2 /
             mkdir /boot
             mount /dev/sda1 /boot
+            mkdir /boot/dtb
+            mkdir /boot/extlinux
             tar-in rootfs.tar /
-            upload zImage    /boot/zImage
-            upload *.dtb     /boot/
-            upload boot.scr  /boot/boot.scr
+            upload /github/workspace/boot/linux /boot/linux
+            upload /github/workspace/dtb/rk3566-rg353v.dtb /boot/dtb/rk3566.dtb
+            upload /github/workspace/extlinux/extlinux.conf  /boot/extlinux/extlinux.conf
             sync
             umount-all
             exit
