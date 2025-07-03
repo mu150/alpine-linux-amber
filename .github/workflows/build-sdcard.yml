@@ -87,23 +87,21 @@ jobs:
           SHA=${{ github.sha }}
           IMG=alpine-rg353vs-${SHA}.img
 
-          # 1) create & flash U‑Boot
+          # 1) Fully allocate the file & flash U‑Boot
           dd if=/dev/zero of="$IMG" bs=1M count=1024 status=none
           dd if=uboot.img of="$IMG" bs=1K seek=8 conv=fsync
-
-          # 2) attach as loop and partition
-          LOOP=$(sudo losetup --show -f "$IMG")
-          sudo parted --script "$LOOP" mklabel msdos
-          sudo parted --script "$LOOP" unit s mkpart primary fat32 2048 131071
-          sudo parted --script "$LOOP" unit s mkpart primary ext4  131072 100%
-          sudo parted --script "$LOOP" set 1 boot on
-          sudo partprobe "$LOOP"
-          sudo losetup -d "$LOOP"
+          
+          # 2) Partition the image file itself
+          sudo parted --script "$IMG" mklabel msdos unit s \
+            mkpart primary fat32 2048 131071 \
+            mkpart primary ext4  131072 100% \
+            set 1 boot on
+          
+          # 3) Attach and format via loop+partscan
           LOOP=$(sudo losetup --show -fP "$IMG")
-
-          # 3) format
           sudo mkfs.vfat -F 32 -n BOOT "${LOOP}p1"
           sudo mkfs.ext4 -L ROOTFS "${LOOP}p2"
+
 
           # 4) mount & populate
           mkdir -p mnt/boot mnt/root
