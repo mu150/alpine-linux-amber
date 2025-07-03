@@ -110,7 +110,8 @@ jobs:
 
           sudo tar xzf rootfs.tar.gz -C mnt/root
           sudo cp linux          mnt/boot/
-          sudo cp rk3566.dtb     mnt/boot/
+          sudo mkdir -p mnt/boot/dtb
+          sudo cp rk3566.dtb     mnt/boot/dtb/
           sudo mkdir -p mnt/boot/extlinux
           sudo cp extlinux.conf  mnt/boot/extlinux/extlinux.conf
 
