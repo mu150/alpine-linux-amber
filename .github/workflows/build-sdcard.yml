@@ -1,27 +1,32 @@
-name: Build & Release Alpine RG353VS SD‑Card Image (guestfish + dd)
+name: Build & Release Alpine RG353VS SD‑Card Image
 
 on:
   push:
-    branches: [ main ]
-    tags: [ 'v*' ]
+    branches:
+      - main
+    tags:
+      - 'v*'
   workflow_dispatch:
 
 jobs:
   build-and-push:
+    name: Build & Push Container
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
       id-token: write
-    steps:
-      - uses: actions/checkout@v4
 
-      - name: Setup QEMU
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup QEMU emulation
         uses: docker/setup-qemu-action@v3
         with:
           platforms: arm64
 
-      - name: Setup Buildx
+      - name: Setup Docker Buildx
         uses: docker/setup-buildx-action@v3
 
       - name: Login to GHCR
@@ -58,12 +63,14 @@ jobs:
           path: alpine-rg353vs-${{ github.sha }}.tar.gz
 
   make-sd-image:
-    runs-on: ubuntu-latest
+    name: Build SD‑Card Image
     needs: build-and-push
+    runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-      - name: Install tools
+      - name: Install guestfish
         run: |
           sudo apt-get update
           sudo apt-get install -y wget libguestfs-tools
@@ -79,10 +86,10 @@ jobs:
           SHA=${{ github.sha }}
           IMG=alpine-rg353vs-${SHA}.img
 
-          # create empty
+          # create a blank 1 GiB image
           truncate -s 1G "$IMG"
 
-          # guestfish: partition, format, inject rootfs & boot files
+          # use guestfish to partition, format, and inject files
           sudo guestfish --format=raw -a "$IMG" <<-'EOF'
             run
             part-init /dev/sda mbr
@@ -94,7 +101,8 @@ jobs:
             mount /dev/sda2 /
             mkdir /boot
             mount /dev/sda1 /boot
-            tar-in rootfs.tar.gz /
+            # use -z for compressed tar
+            tar-in -z rootfs.tar.gz /
             copy-in zImage    /boot/
             copy-in *.dtb     /boot/
             copy-in boot.scr  /boot/
@@ -107,14 +115,14 @@ jobs:
         run: |
           dd if=uboot.img of=alpine-rg353vs-${{ github.sha }}.img bs=1K seek=8 conv=fsync
 
-      - name: List and upload SD‑Card image
-        run: ls -lh alpine-rg353vs-${{ github.sha }}.img
-      - uses: actions/upload-artifact@v4
+      - name: Upload SD‑Card artifact
+        uses: actions/upload-artifact@v4
         with:
           name: sdcard-${{ github.sha }}
           path: alpine-rg353vs-${{ github.sha }}.img
 
   package-release:
+    name: Create Release & Attach Assets
     needs: [build-and-push, make-sd-image]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
