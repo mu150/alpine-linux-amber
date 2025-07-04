@@ -10,10 +10,10 @@ jobs:
   generate-initrd:
     runs-on: ubuntu-latest
     env:
-      WORKSPACE: ${{ github.workspace }}
+      WS: ${{ github.workspace }}
 
     steps:
-      - name: Check out sources
+      - name: Checkout code
         uses: actions/checkout@v4
 
       - name: Download Alpine minirootfs
@@ -26,44 +26,43 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y qemu-user-static binfmt-support
 
-      - name: Unpack rootfs & bind mounts
+      - name: Prepare rootfs & mount out/
         run: |
-          mkdir -p rootfs/{dev,proc,sys,mnt,etc,tmp}
+          mkdir -p rootfs/{dev,proc,sys,out} out
           tar xzf alpine-minirootfs.tar.gz -C rootfs
           sudo cp /etc/resolv.conf rootfs/etc/
           sudo cp /usr/bin/qemu-aarch64-static rootfs/usr/bin/
           for fs in dev proc sys; do sudo mount --bind /$fs rootfs/$fs; done
-          sudo mount --bind "$WORKSPACE" rootfs/mnt
+          sudo mount --bind "$WS/out" rootfs/out
 
-      - name: Install mkinitfs & linux-virt in chroot
+      - name: Install mkinitfs & linux-virt
         run: |
           sudo chroot rootfs /bin/sh -euxc '
             apk update
             apk add mkinitfs linux-virt
           '
 
-      - name: Generate initrd and drop into workspace
+      - name: Generate initrd into out/
         run: |
           MODVER=$(ls rootfs/lib/modules)
-          echo "Using modules version: $MODVER"
           sudo chroot rootfs /bin/sh -euxc "
             mkinitfs \
               -c /etc/mkinitfs/mkinitfs.conf \
               -k $MODVER \
-              -o /mnt/initrd-arm64.gz
+              -o /out/initrd-arm64.gz
           "
 
-      - name: "Debug: list workspace"
+      - name: Cleanup mounts
         run: |
-          echo "Contents of $WORKSPACE:"
-          ls -lh "$WORKSPACE"
+          for fs in dev proc sys out; do sudo umount rootfs/$fs || true; done
 
-      - name: Cleanup mountpoints
+      - name: Debug: show generated file
         run: |
-          for fs in dev proc sys mnt; do sudo umount rootfs/$fs || true; done
+          echo "Host out/ folder now contains:"
+          ls -lh out
 
-      - name: Upload initrd.gz
+      - name: Upload initrd artifact
         uses: actions/upload-artifact@v4
         with:
           name: alpine-initrd-arm64
-          path: initrd-arm64.gz
+          path: out/initrd-arm64.gz
