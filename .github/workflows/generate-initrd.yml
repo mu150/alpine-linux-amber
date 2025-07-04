@@ -5,8 +5,6 @@ on:
   push:
     branches:
       - main
-    paths:
-      - 'path/to/initrd-config/**'  # optionally watch only initrd-related files
 
 jobs:
   generate-initrd:
@@ -15,7 +13,6 @@ jobs:
     steps:
       - name: Download Alpine minirootfs
         run: |
-          VER=${{ github.event.inputs.minirootfs-version }}
           URL="http://dl-cdn.alpinelinux.org/alpine/v3.22/releases/aarch64/alpine-minirootfs-3.22.0-aarch64.tar.gz"
           wget -O alpine-minirootfs.tar.gz "$URL"
 
@@ -28,14 +25,24 @@ jobs:
         run: |
           mkdir rootfs
           tar xzf alpine-minirootfs.tar.gz -C rootfs
+          # Enable DNS inside chroot:
+          sudo cp /etc/resolv.conf rootfs/etc/
+          # Register ARM emulation
           sudo cp /usr/bin/qemu-aarch64-static rootfs/usr/bin/
+          # Mount necessary pseudo-filesystems
           for fs in dev proc sys; do sudo mount --bind /$fs rootfs/$fs; done
 
       - name: Install mkinitfs & kernel inside chroot
         run: |
           sudo chroot rootfs /bin/sh -euxc "
+            # now networking works
             apk update
             apk add mkinitfs linux-virt
+          "
+
+      - name: Generate initrd
+        run: |
+          sudo chroot rootfs /bin/sh -euxc "
             mkinitfs -c /etc/mkinitfs/mkinitfs.conf -o /initrd-arm64.gz
           "
 
