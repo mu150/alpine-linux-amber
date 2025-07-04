@@ -22,7 +22,7 @@ jobs:
 
       - name: Unpack rootfs & prepare chroot
         run: |
-          mkdir rootfs
+          mkdir -p rootfs
           tar xzf alpine-minirootfs.tar.gz -C rootfs
           sudo cp /etc/resolv.conf rootfs/etc/
           sudo cp /usr/bin/qemu-aarch64-static rootfs/usr/bin/
