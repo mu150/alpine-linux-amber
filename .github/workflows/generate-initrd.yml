@@ -3,8 +3,7 @@ name: Generate Alpine ARM64 initrd
 on:
   workflow_dispatch:
   push:
-    branches:
-      - main
+    branches: [ main ]
 
 jobs:
   generate-initrd:
@@ -27,7 +26,15 @@ jobs:
           tar xzf alpine-minirootfs.tar.gz -C rootfs
           sudo cp /etc/resolv.conf rootfs/etc/
           sudo cp /usr/bin/qemu-aarch64-static rootfs/usr/bin/
-          for fs in dev proc sys; do sudo mount --bind /$fs rootfs/$fs; done
+
+          # bind dev, proc, sys
+          for fs in dev proc sys; do
+            sudo mount --bind /$fs rootfs/$fs
+          done
+
+          # bind the workflow workspace into the chroot at /mnt
+          sudo mkdir rootfs/mnt
+          sudo mount --bind $PWD rootfs/mnt
 
       - name: Install mkinitfs & linux-virt inside chroot
         run: |
@@ -36,28 +43,27 @@ jobs:
             apk add mkinitfs linux-virt
           '
 
-      - name: Generate initrd with the correct module dir
+      - name: Generate initrd and drop into workspace
         run: |
+          # detect the kernel version inside the chroot
           MODVER=$(ls rootfs/lib/modules)
           echo "Using modules version: $MODVER"
+
           sudo chroot rootfs /bin/sh -euxc "
             mkinitfs \
               -c /etc/mkinitfs/mkinitfs.conf \
               -k $MODVER \
-              -o /initrd-arm64.gz
+              -o /mnt/initrd-arm64.gz
           "
 
       - name: Cleanup chroot mounts
         run: |
-          for fs in dev proc sys; do sudo umount rootfs/$fs; done
-
-      - name: Retrieve initrd from chroot
-        run: |
-          # copy and rename to workspace root
-          cp rootfs/initrd-arm64.gz initrd.gz
+          for fs in dev proc sys mnt; do
+            sudo umount rootfs/$fs
+          done
 
       - name: Upload initrd.gz
         uses: actions/upload-artifact@v4
         with:
           name: alpine-initrd-arm64
-          path: initrd.gz
+          path: initrd-arm64.gz
