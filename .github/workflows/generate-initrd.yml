@@ -13,28 +13,27 @@ jobs:
     steps:
       - name: Download Alpine minirootfs
         run: |
-          URL="http://dl-cdn.alpinelinux.org/alpine/v3.22/releases/aarch64/alpine-minirootfs-3.22.0-aarch64.tar.gz"
-          wget -O alpine-minirootfs.tar.gz "$URL"
+          wget -O alpine-minirootfs.tar.gz \
+            http://dl-cdn.alpinelinux.org/alpine/v3.22/releases/aarch64/alpine-minirootfs-3.22.0-aarch64.tar.gz
 
       - name: Install host deps for ARM chroot
         run: |
           sudo apt-get update
-          sudo apt-get install -y \
-            qemu-user-static binfmt-support
+          sudo apt-get install -y qemu-user-static binfmt-support
 
-      - name: Unpack rootfs and prepare chroot
+      - name: Unpack rootfs & prepare chroot
         run: |
           mkdir rootfs
           tar xzf alpine-minirootfs.tar.gz -C rootfs
-          sudo cp /etc/resolv.conf rootfs/etc/
+          sudo cp /etc/resolv.conf       rootfs/etc/
           sudo cp /usr/bin/qemu-aarch64-static rootfs/usr/bin/
           for fs in dev proc sys; do sudo mount --bind /$fs rootfs/$fs; done
 
-      - name: Install mkinitfs & ARM64 kernel package
+      - name: Install mkinitfs & linux-virt inside chroot
         run: |
           sudo chroot rootfs /bin/sh -euxc "
             apk update
-            apk add mkinitfs linux-virt linux-virt-headers
+            apk add mkinitfs linux-virt
           "
 
       - name: Generate initrd
@@ -46,7 +45,6 @@ jobs:
       - name: Cleanup chroot mounts
         run: |
           for fs in dev proc sys; do sudo umount rootfs/$fs; done
-
 
       - name: Upload initrd.gz
         uses: actions/upload-artifact@v4
