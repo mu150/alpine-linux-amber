@@ -2,11 +2,6 @@ name: Generate Alpine ARM64 initrd
 
 on:
   workflow_dispatch:
-    inputs:
-      minirootfs-version:
-        description: 'Alpine minirootfs version (e.g. 3.19.0)'
-        required: true
-        default: '3.19.0'
   push:
     branches:
       - main
@@ -21,7 +16,7 @@ jobs:
       - name: Download Alpine minirootfs
         run: |
           VER=${{ github.event.inputs.minirootfs-version }}
-          URL="http://dl-cdn.alpinelinux.org/alpine/v$VER/releases/aarch64/alpine-minirootfs-$VER-aarch64.tar.gz"
+          URL="http://dl-cdn.alpinelinux.org/alpine/v3.22/releases/aarch64/alpine-minirootfs-3.22.0-aarch64.tar.gz"
           wget -O alpine-minirootfs.tar.gz "$URL"
 
       - name: Install host deps for ARM chroot
