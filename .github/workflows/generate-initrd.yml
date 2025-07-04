@@ -56,7 +56,7 @@ jobs:
         run: |
           for fs in dev proc sys out; do sudo umount rootfs/$fs || true; done
 
-      - name: Debug: show generated file
+      - name: "Debug: show generated file"
         run: |
           echo "Host out/ folder now contains:"
           ls -lh out
