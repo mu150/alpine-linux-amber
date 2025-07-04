@@ -33,7 +33,7 @@ jobs:
           done
 
           # bind the workflow workspace into the chroot at /mnt
-          sudo mkdir rootfs/mnt
+          sudo mkdir -p rootfs/mnt
           sudo mount --bind $PWD rootfs/mnt
 
       - name: Install mkinitfs & linux-virt inside chroot
