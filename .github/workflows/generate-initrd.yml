@@ -3,13 +3,19 @@ name: Generate Alpine ARM64 initrd
 on:
   workflow_dispatch:
   push:
-    branches: [ main ]
+    branches:
+      - main
 
 jobs:
   generate-initrd:
     runs-on: ubuntu-latest
+    env:
+      WORKSPACE: ${{ github.workspace }}
 
     steps:
+      - name: Check out sources
+        uses: actions/checkout@v4
+
       - name: Download Alpine minirootfs
         run: |
           wget -O alpine-minirootfs.tar.gz \
@@ -20,23 +26,19 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y qemu-user-static binfmt-support
 
-      - name: Unpack rootfs & prepare chroot
+      - name: Unpack rootfs & bind mounts
         run: |
-          mkdir -p rootfs
+          mkdir -p rootfs/{dev,proc,sys,mnt,etc,tmp}
           tar xzf alpine-minirootfs.tar.gz -C rootfs
           sudo cp /etc/resolv.conf rootfs/etc/
           sudo cp /usr/bin/qemu-aarch64-static rootfs/usr/bin/
 
-          # bind dev, proc, sys
           for fs in dev proc sys; do
             sudo mount --bind /$fs rootfs/$fs
           done
+          sudo mount --bind "$WORKSPACE" rootfs/mnt
 
-          # bind the workflow workspace into the chroot at /mnt
-          sudo mkdir -p rootfs/mnt
-          sudo mount --bind $PWD rootfs/mnt
-
-      - name: Install mkinitfs & linux-virt inside chroot
+      - name: Install mkinitfs & linux-virt in chroot
         run: |
           sudo chroot rootfs /bin/sh -euxc '
             apk update
@@ -45,7 +47,6 @@ jobs:
 
       - name: Generate initrd and drop into workspace
         run: |
-          # detect the kernel version inside the chroot
           MODVER=$(ls rootfs/lib/modules)
           echo "Using modules version: $MODVER"
 
@@ -56,10 +57,15 @@ jobs:
               -o /mnt/initrd-arm64.gz
           "
 
-      - name: Cleanup chroot mounts
+      - name: Debug: list workspace
+        run: |
+          echo "Contents of $WORKSPACE:"
+          ls -lh "$WORKSPACE"
+
+      - name: Cleanup mountpoints
         run: |
           for fs in dev proc sys mnt; do
-            sudo umount rootfs/$fs
+            sudo umount rootfs/$fs || true
           done
 
       - name: Upload initrd.gz
