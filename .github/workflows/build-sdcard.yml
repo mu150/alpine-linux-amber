@@ -26,7 +26,7 @@ jobs:
           # parameters
           SHA=${{ github.sha }}
           IMG=alpine-rg353vs-${SHA}.img
-          MINIROOT=http://dl-cdn.alpinelinux.org/alpine/v3.19/releases/aarch64/alpine-minirootfs-3.19.0-aarch64.tar.gz
+          MINIROOT=https://dl-cdn.alpinelinux.org/alpine/v3.22/releases/aarch64/alpine-minirootfs-3.22.0-aarch64.tar.gz
 
           # 1) Download Alpine minirootfs
           wget -O rootfs.tar.gz "$MINIROOT"
