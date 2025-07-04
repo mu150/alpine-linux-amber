@@ -19,25 +19,22 @@ jobs:
       - name: Install host deps for ARM chroot
         run: |
           sudo apt-get update
-          sudo apt-get install -y qemu-user-static binfmt-support
+          sudo apt-get install -y \
+            qemu-user-static binfmt-support
 
       - name: Unpack rootfs and prepare chroot
         run: |
           mkdir rootfs
           tar xzf alpine-minirootfs.tar.gz -C rootfs
-          # Enable DNS inside chroot:
           sudo cp /etc/resolv.conf rootfs/etc/
-          # Register ARM emulation
           sudo cp /usr/bin/qemu-aarch64-static rootfs/usr/bin/
-          # Mount necessary pseudo-filesystems
           for fs in dev proc sys; do sudo mount --bind /$fs rootfs/$fs; done
 
-      - name: Install mkinitfs & kernel inside chroot
+      - name: Install mkinitfs & ARM64 kernel package
         run: |
           sudo chroot rootfs /bin/sh -euxc "
-            # now networking works
             apk update
-            apk add mkinitfs linux-virt
+            apk add mkinitfs linux-virt linux-virt-headers
           "
 
       - name: Generate initrd
@@ -49,6 +46,7 @@ jobs:
       - name: Cleanup chroot mounts
         run: |
           for fs in dev proc sys; do sudo umount rootfs/$fs; done
+
 
       - name: Upload initrd.gz
         uses: actions/upload-artifact@v4
