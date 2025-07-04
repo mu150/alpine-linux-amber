@@ -1,0 +1,55 @@
+name: Generate Alpine ARM64 initrd
+
+on:
+  workflow_dispatch:
+    inputs:
+      minirootfs-version:
+        description: 'Alpine minirootfs version (e.g. 3.19.0)'
+        required: true
+        default: '3.19.0'
+  push:
+    branches:
+      - main
+    paths:
+      - 'path/to/initrd-config/**'  # optionally watch only initrd-related files
+
+jobs:
+  generate-initrd:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download Alpine minirootfs
+        run: |
+          VER=${{ github.event.inputs.minirootfs-version }}
+          URL="http://dl-cdn.alpinelinux.org/alpine/v$VER/releases/aarch64/alpine-minirootfs-$VER-aarch64.tar.gz"
+          wget -O alpine-minirootfs.tar.gz "$URL"
+
+      - name: Install host deps for ARM chroot
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qemu-user-static binfmt-support
+
+      - name: Unpack rootfs and prepare chroot
+        run: |
+          mkdir rootfs
+          tar xzf alpine-minirootfs.tar.gz -C rootfs
+          sudo cp /usr/bin/qemu-aarch64-static rootfs/usr/bin/
+          for fs in dev proc sys; do sudo mount --bind /$fs rootfs/$fs; done
+
+      - name: Install mkinitfs & kernel inside chroot
+        run: |
+          sudo chroot rootfs /bin/sh -euxc "
+            apk update
+            apk add mkinitfs linux-virt
+            mkinitfs -c /etc/mkinitfs/mkinitfs.conf -o /initrd-arm64.gz
+          "
+
+      - name: Cleanup chroot mounts
+        run: |
+          for fs in dev proc sys; do sudo umount rootfs/$fs; done
+
+      - name: Upload initrd.gz
+        uses: actions/upload-artifact@v4
+        with:
+          name: alpine-initrd-arm64
+          path: initrd-arm64.gz
