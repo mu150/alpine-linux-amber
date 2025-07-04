@@ -1,5 +1,5 @@
 # .github/workflows/build-rootfs-16gb.yml
-name: Build Alpine Rootfs + Blank 1.2GiB BOOT on 16GiB Image
+name: Build Alpine Rootfs + Blank 1.2GiB BOOT
 
 on:
   push:
@@ -19,7 +19,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y wget parted dosfstools e2fsprogs
 
-      - name: Build 16GiB Image with 1.2GiB BOOT, rest ROOTFS
+      - name: Build Image with 1.2GiB BOOT, rest ROOTFS
         run: |
           set -euxo pipefail
 
@@ -32,7 +32,7 @@ jobs:
           wget -O rootfs.tar.gz "$MINIROOT"
 
           # 2) Create blank 16 GiB image file
-          truncate -s 16G "$IMG"
+          truncate -s 5G "$IMG"
 
           # 3) Partition:
           #    - p1: 1MiB → 1229MiB (≈1.2 GiB) FAT32, bootable
