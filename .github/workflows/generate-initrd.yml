@@ -32,10 +32,7 @@ jobs:
           tar xzf alpine-minirootfs.tar.gz -C rootfs
           sudo cp /etc/resolv.conf rootfs/etc/
           sudo cp /usr/bin/qemu-aarch64-static rootfs/usr/bin/
-
-          for fs in dev proc sys; do
-            sudo mount --bind /$fs rootfs/$fs
-          done
+          for fs in dev proc sys; do sudo mount --bind /$fs rootfs/$fs; done
           sudo mount --bind "$WORKSPACE" rootfs/mnt
 
       - name: Install mkinitfs & linux-virt in chroot
@@ -49,7 +46,6 @@ jobs:
         run: |
           MODVER=$(ls rootfs/lib/modules)
           echo "Using modules version: $MODVER"
-
           sudo chroot rootfs /bin/sh -euxc "
             mkinitfs \
               -c /etc/mkinitfs/mkinitfs.conf \
@@ -57,16 +53,14 @@ jobs:
               -o /mnt/initrd-arm64.gz
           "
 
-      - name: Debug: list workspace
+      - name: "Debug: list workspace"
         run: |
           echo "Contents of $WORKSPACE:"
           ls -lh "$WORKSPACE"
 
       - name: Cleanup mountpoints
         run: |
-          for fs in dev proc sys mnt; do
-            sudo umount rootfs/$fs || true
-          done
+          for fs in dev proc sys mnt; do sudo umount rootfs/$fs || true; done
 
       - name: Upload initrd.gz
         uses: actions/upload-artifact@v4
