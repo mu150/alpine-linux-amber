@@ -38,10 +38,8 @@ jobs:
 
       - name: Generate initrd with the correct module dir
         run: |
-          # detect the only directory under rootfs/lib/modules
           MODVER=$(ls rootfs/lib/modules)
           echo "Using modules version: $MODVER"
-
           sudo chroot rootfs /bin/sh -euxc "
             mkinitfs \
               -c /etc/mkinitfs/mkinitfs.conf \
@@ -53,8 +51,13 @@ jobs:
         run: |
           for fs in dev proc sys; do sudo umount rootfs/$fs; done
 
+      - name: Retrieve initrd from chroot
+        run: |
+          # copy and rename to workspace root
+          cp rootfs/initrd-arm64.gz initrd.gz
+
       - name: Upload initrd.gz
         uses: actions/upload-artifact@v4
         with:
           name: alpine-initrd-arm64
-          path: initrd-arm64.gz
+          path: initrd.gz
