@@ -36,7 +36,7 @@ jobs:
 
       # 5. Inside the Alpine chroot (as root!), install kernel+mkinitfs and build the initrd
       - name: Build initrd inside Alpine chroot
-        shell: alpine.sh --root {0}      # <-- run as root inside chroot :contentReference[oaicite:0]{index=0}
+        shell: alpine.sh --root {0}
         run: |
           set -eux
 
@@ -53,13 +53,17 @@ jobs:
           KVER=$(ls /lib/modules | head -n1)
           echo "Generating initrd for kernel $KVER"
 
-          # Generate the compressed initramfs
+          # Generate the compressed initramfs into /boot/initrd-arm64.gz
           mkinitfs \
             -c /etc/mkinitfs/mkinitfs.conf \
             -k "$KVER" \
-            -o /tmp/initrd-arm64.gz
+            -o initrd-arm64.gz
 
-          # Show its size
+          # Verify it landed in /boot
+          ls -lh /boot/initrd-arm64.gz
+
+          # Copy it out to /tmp for artifact upload
+          cp /boot/initrd-arm64.gz /tmp/initrd-arm64.gz
           ls -lh /tmp/initrd-arm64.gz
 
       # 6. Upload the resulting initrd as an artifact
