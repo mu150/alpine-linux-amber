@@ -11,59 +11,49 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # 1. Check out your repo
-      - name: Check out code
+      # 1. Check out your code
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 2. Register QEMU/binfmt so we can chroot into an aarch64 rootfs
+      # 2. Register QEMU/binfmt so chroot can exec ARM64 binaries
       - name: Register QEMU emulation
         uses: docker/setup-qemu-action@v3
         with:
           platforms: all
 
-      # 3. Install host prerequisites (binfmt-support + static QEMU binary)
+      # 3. Install host dependencies
       - name: Install host deps
         run: |
           sudo apt-get update
           sudo apt-get install -y binfmt-support qemu-user-static
 
-      # 4. Bootstrap Alpine aarch64
-      - name: Setup Alpine v3.22 (aarch64)
+      # 4. Bootstrap Alpine aarch64 (v3.22)
+      - name: Setup Alpine v3.22 aarch64
         uses: jirutka/setup-alpine@v1
         with:
           branch: v3.22
           arch: aarch64
 
-      # 5. Inside the Alpine chroot (as root!), install kernel+mkinitfs and build the initrd
-      - name: Build initrd inside Alpine chroot
+      # 5. Inside the Alpine chroot (as root!), install kernel + mkinitfs and build the initrd
+      - name: Build initrd in Alpine chroot
         shell: alpine.sh --root {0}
         run: |
           set -eux
 
-          # Update package index
+          # 5.1 Update index and install kernel & mkinitfs tooling
           apk update
+          apk add --no-cache linux-virt mkinitfs busybox
 
-          # Install kernel (with modules) and mkinitfs
-          apk add --no-cache \
-            linux-virt \
-            mkinitfs \
-            busybox
-
-          # Pick the first kernel version directory
+          # 5.2 Pick the installed kernel version (e.g. "6.12.35-0-virt")
           KVER=$(ls /lib/modules | head -n1)
           echo "Generating initrd for kernel $KVER"
 
-          # Generate the compressed initramfs into /boot/initrd-arm64.gz
-          mkinitfs \
-            -c /etc/mkinitfs/mkinitfs.conf \
-            -k "$KVER" \
-            -o initrd-arm64.gz
+          # 5.3 Generate the initramfs (Alpine always writes to /boot/initramfs-<flavor>)
+          mkinitfs -c /etc/mkinitfs/mkinitfs.conf -k "$KVER"
 
-          # Verify it landed in /boot
-          ls -lh /boot/initrd-arm64.gz
-
-          # Copy it out to /tmp for artifact upload
-          cp /boot/initrd-arm64.gz /tmp/initrd-arm64.gz
+          # 5.4 Verify the real file name (usually "initramfs-virt") and copy it out
+          ls -lh /boot
+          cp /boot/initramfs-* /tmp/initrd-arm64.gz
           ls -lh /tmp/initrd-arm64.gz
 
       # 6. Upload the resulting initrd as an artifact
