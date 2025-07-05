@@ -54,7 +54,7 @@ jobs:
               \"
             "
 
-      - name: Debug: list workspace
+      - name: "Debug: list workspace"
         run: |
           echo ">> workspace contents:"
           ls -lh
