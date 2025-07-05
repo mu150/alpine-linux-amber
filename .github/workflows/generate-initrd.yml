@@ -1,78 +1,56 @@
 name: Generate Alpine ARM64 initrd
-
 on:
   workflow_dispatch:
   push:
-    branches:
-      - main
+    branches: [ main ]
 
 jobs:
   generate-initrd:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Check out code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Install host deps
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y qemu-user-static binfmt-support
+      # 1. Register QEMU emulation for aarch64
+      - name: Set up binfmt (for non‑x86 chroots)
+        uses: docker/setup-binfmt-action@v2
+      - name: Set up QEMU user emulation
+        uses: docker/setup-qemu-action@v2
 
-      - name: Download Alpine aarch64 minirootfs
-        run: |
-          wget -O alpine-minirootfs.tar.gz \
-            "http://dl-cdn.alpinelinux.org/alpine/v3.22/releases/aarch64/alpine-minirootfs-3.22.0-aarch64.tar.gz"
+      # 2. Bootstrap Alpine aarch64 via a tested action
+      - name: Setup Alpine v3.22 (aarch64)
+        uses: jirutka/setup-alpine@v1
+        with:
+          branch: v3.22
+          arch: aarch64
 
-      - name: Prepare chroot tree
-        run: |
-          rm -rf rootfs
-          mkdir -p rootfs/{dev,proc,sys}
-          tar xzf alpine-minirootfs.tar.gz -C rootfs
-          sudo cp /etc/resolv.conf rootfs/etc/
-          sudo cp /usr/bin/qemu-aarch64-static rootfs/usr/bin/
-          for fs in dev proc sys; do 
-            sudo mount --bind "/$fs" "rootfs/$fs" || { echo "Mount failed: /$fs"; exit 1; }
-          done
-
-      - name: Build initrd inside chroot
-        run: |
-          sudo chroot rootfs /bin/sh -eux << 'EOF'
-            set -x  # Enable debug output
-            apk update
-            apk add --no-cache busybox mkinitfs linux-virt  # Ensure dependencies [[9]](#user-content-9)
-
-            # Verify kernel modules exist
-            ls /lib/modules || { echo "No kernel modules found"; exit 1; }
-            KVER=$(ls /lib/modules | head -n1)  # Avoid empty KVER [[4]](#user-content-4)
-            echo "Generating initrd for kernel: $KVER"
-
-            # Explicitly generate initrd to root directory
-            mkinitfs \
-              -c /etc/mkinitfs/mkinitfs.conf \
-              -k "$KVER" \
-              -o "/initrd-arm64.gz"  # Absolute path ensures correct output [[5]](#user-content-5)
-
-            # Confirm file exists
-            [ -f /initrd-arm64.gz ] && echo "Initrd size: $(du -h /initrd-arm64.gz)"
-          EOF
-
-      - name: Cleanup mounts
-        run: |
-          for fs in dev proc sys; do 
-            sudo umount rootfs/$fs || true
-          done
-
-      - name: Copy initrd to workspace
+      # 3. Inside Alpine, install kernel+mkinitfs and build the initrd
+      - name: Build initrd inside Alpine chroot
+        shell: alpine.sh {0}
         run: |
           set -eux
-          # Ensure the initrd exists and is non-empty
-          [ -f rootfs/initrd-arm64.gz ] && [ -s rootfs/initrd-arm64.gz ]
-          cp rootfs/initrd-arm64.gz initrd-arm64.gz
-          ls -lh initrd-arm64.gz
+          # Ensure we have a kernel (with modules) and mkinitfs
+          apk update
+          apk add --no-cache \
+            linux-virt      \
+            mkinitfs        \
+            busybox
 
+          # Find the kernel version directory under /lib/modules
+          KVER=$(ls /lib/modules | head -n1)
+          echo "Generating initrd for kernel $KVER"
+          
+          # Generate a compressed initramfs
+          mkinitfs \
+            -c /etc/mkinitfs/mkinitfs.conf \
+            -k "$KVER"                     \
+            -o /tmp/initrd-arm64.gz
+
+          ls -lh /tmp/initrd-arm64.gz
+
+      # 4. Upload the generated initrd as a GitHub Actions artifact
       - name: Upload initrd artifact
         uses: actions/upload-artifact@v4
         with:
           name: alpine-initrd-arm64
-          path: initrd-arm64.gz
+          path: /tmp/initrd-arm64.gz
