@@ -27,25 +27,26 @@ jobs:
             -v "${{ github.workspace }}:/outputs" \
             alpine:3.22 \
             sh -euxc '
-              # update and install kernel + mkinitfs
               apk update
               apk add --no-cache linux-virt mkinitfs busybox
 
-              # detect kernel version dir
               KVER=$(ls /lib/modules | head -n1)
               echo "Generating initrd for kernel $KVER"
 
-              # create the initramfs (goes to /boot/initramfs-virt)
+              # mkinitfs always writes to /boot/initramfs-<flavor>
               mkinitfs -k "$KVER"
 
-              # copy it out of /boot to your workspace
+              # copy it into your workspace
               cp /boot/initramfs-* /outputs/initrd-arm64.gz
 
-              # sanity-check
               ls -lh /outputs/initrd-arm64.gz
             '
 
-      # 4. Upload the artifact
+      # 4. Fix permissions so the runner can read it
+      - name: Fix initrd permissions
+        run: sudo chmod a+r initrd-arm64.gz
+
+      # 5. Upload the artifact
       - name: Upload initrd artifact
         uses: actions/upload-artifact@v4
         with:
