@@ -31,7 +31,9 @@ jobs:
           tar xzf alpine-minirootfs.tar.gz -C rootfs
           sudo cp /etc/resolv.conf rootfs/etc/
           sudo cp /usr/bin/qemu-aarch64-static rootfs/usr/bin/
-          for fs in dev proc sys; do sudo mount --bind /$fs rootfs/$fs; done
+          for fs in dev proc sys; do 
+            sudo mount --bind /$fs rootfs/$fs || true
+          done
 
       - name: Build initrd inside chroot
         run: |
@@ -40,7 +42,9 @@ jobs:
             apk update
             apk add --no-cache mkinitfs linux-virt
 
-            KVER=$(ls /lib/modules)
+            # Ensure kernel modules exist
+            ls /lib/modules || { echo "No kernel modules found"; exit 1; }
+            KVER=$(ls /lib/modules | head -n1)  # Avoid empty KVER
             echo "Generating initrd for kernel modules: $KVER"
 
             # Output to the chroot's /initrd-arm64.gz
@@ -52,14 +56,15 @@ jobs:
 
       - name: Cleanup mounts
         run: |
-          for fs in dev proc sys; do sudo umount rootfs/$fs || true; done
+          for fs in dev proc sys; do 
+            sudo umount rootfs/$fs || true
+          done
 
       - name: Copy initrd to workspace
         run: |
           set -eux
-          # ensure it exists
-          [ -f rootfs/initrd-arm64.gz ]
-          # pull it out
+          # Ensure the initrd exists and is non-empty
+          [ -f rootfs/initrd-arm64.gz ] && [ -s rootfs/initrd-arm64.gz ]
           cp rootfs/initrd-arm64.gz initrd-arm64.gz
           ls -lh initrd-arm64.gz
 
