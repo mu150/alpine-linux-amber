@@ -3,76 +3,61 @@ name: Generate Alpine ARM64 initrd
 on:
   workflow_dispatch:
   push:
-    branches: [ main ]
+    branches:
+      - main
 
 jobs:
   generate-initrd:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Check out repo
+      - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Download Alpine minirootfs
+      - name: Set up QEMU emulation
+        uses: docker/setup-qemu-action@v2
+        with:
+          platforms: arm64
+
+      - name: Download Alpine ARM64 rootfs
         run: |
           wget -O alpine-minirootfs.tar.gz \
             http://dl-cdn.alpinelinux.org/alpine/v3.22/releases/aarch64/alpine-minirootfs-3.22.0-aarch64.tar.gz
 
-      - name: Install QEMU & binfmt support
+      - name: Generate initrd inside ARM container
         run: |
-          sudo apt-get update
-          sudo apt-get install -y qemu-user-static binfmt-support
+          docker run --rm \
+            --platform linux/arm64 \
+            -v $PWD:/workspace -w /workspace \
+            alpine:3.22.0-aarch64 \
+            /bin/sh -euxc "
+              apk update
+              apk add --no-cache mkinitfs linux-virt qemu-user-static
 
-      - name: Unpack rootfs & mount special filesystems
+              # Alpine’s modules directory (e.g. 5.15.0-virt)
+              MODVER=\$(ls /lib/modules)
+              echo \"Using modules: \$MODVER\"
+
+              # reconstruct the rootfs from the tarball
+              mkdir -p /alpine && \
+              tar xzf alpine-minirootfs.tar.gz -C /alpine
+
+              # bind QEMU into the chroot so that mkinitfs can run
+              cp /usr/bin/qemu-aarch64-static /alpine/usr/bin/
+
+              # chroot and generate the initrd, dropping it in /workspace
+              chroot /alpine /bin/sh -euxc \"
+                mkinitfs \
+                  -c /etc/mkinitfs/mkinitfs.conf \
+                  -k \$MODVER \
+                  -o /workspace/initrd-arm64.gz
+              \"
+            "
+
+      - name: Debug: list workspace
         run: |
-          mkdir -p rootfs/{dev,proc,sys,tmp}
-          tar xzf alpine-minirootfs.tar.gz -C rootfs
-
-          # copy DNS + QEMU
-          sudo cp /etc/resolv.conf    rootfs/etc/
-          sudo cp /usr/bin/qemu-aarch64-static rootfs/usr/bin/
-
-          # bind mounts
-          for fs in dev proc sys; do
-            sudo mount --bind /$fs rootfs/$fs
-          done
-
-      - name: Install mkinitfs & linux-virt in chroot
-        run: |
-          sudo chroot rootfs /bin/sh -euxc '
-            apk update
-            apk add mkinitfs linux-virt
-          '
-
-      - name: Generate initrd inside chroot
-        run: |
-          # figure out the kernel version directory
-          MODVER=$(ls rootfs/lib/modules)
-          echo "Using module dir: $MODVER"
-
-          sudo chroot rootfs /bin/sh -euxc "
-            mkinitfs \
-              -c /etc/mkinitfs/mkinitfs.conf \
-              -k $MODVER \
-              -o /initrd-arm64.gz
-          "
-
-      - name: Cleanup mounts
-        run: |
-          for fs in dev proc sys; do
-            sudo umount rootfs/$fs || true
-          done
-
-      - name: "Debug: show initrd in rootfs"
-        run: |
-          echo "Inside rootfs:"
-          ls -lh rootfs/initrd-arm64.gz || echo "not found!"
-
-      - name: Copy initrd to workspace
-        run: |
-          cp rootfs/initrd-arm64.gz initrd-arm64.gz
-          echo "In workspace now:"
-          ls -lh initrd-arm64.gz
+          echo ">> workspace contents:"
+          ls -lh
 
       - name: Upload initrd artifact
         uses: actions/upload-artifact@v4
