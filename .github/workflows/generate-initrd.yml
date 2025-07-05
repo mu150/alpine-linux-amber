@@ -14,36 +14,38 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # 2. Register QEMU emulation so `docker run --platform linux/arm64` works
+      # 2. Register QEMU emulation so we can spin up ARM64 containers
       - name: Register QEMU emulation
         uses: docker/setup-qemu-action@v3
         with:
           platforms: all
 
-      # 3. Build the initrd inside an Alpine ARM64 container
-      - name: Build initrd via Docker
+      # 3. Build the initrd in an Alpine ARM64 container
+      - name: Build initrd via Docker+QEMU
         run: |
-          # Run Alpine aarch64 under QEMU, mount your workspace at /outputs
           docker run --rm --privileged --platform linux/arm64 \
             -v "${{ github.workspace }}:/outputs" \
             alpine:3.22 \
             sh -euxc '
-              # 3.1 Update index and install kernel+mkinitfs tooling
+              # update and install kernel + mkinitfs
               apk update
               apk add --no-cache linux-virt mkinitfs busybox
 
-              # 3.2 Find the installed kernel version
+              # detect kernel version dir
               KVER=$(ls /lib/modules | head -n1)
               echo "Generating initrd for kernel $KVER"
 
-              # 3.3 Write the initramfs directly into your workspace
-              mkinitfs -k "$KVER" -o /outputs/initrd-arm64.gz
+              # create the initramfs (goes to /boot/initramfs-virt)
+              mkinitfs -k "$KVER"
 
-              # 3.4 Show the file size
+              # copy it out of /boot to your workspace
+              cp /boot/initramfs-* /outputs/initrd-arm64.gz
+
+              # sanity-check
               ls -lh /outputs/initrd-arm64.gz
             '
 
-      # 4. Upload the resulting initrd as an artifact
+      # 4. Upload the artifact
       - name: Upload initrd artifact
         uses: actions/upload-artifact@v4
         with:
