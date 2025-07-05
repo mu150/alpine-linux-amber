@@ -1,54 +1,70 @@
 name: Generate Alpine ARM64 initrd
+
 on:
   workflow_dispatch:
   push:
-    branches: [ main ]
+    branches:
+      - main
 
 jobs:
   generate-initrd:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      # 1. Check out your repo
+      - name: Check out code
+        uses: actions/checkout@v4
 
-      # 1. Register QEMU emulation for aarch64
-      - name: Set up binfmt (for non‑x86 chroots)
-        uses: docker/setup-binfmt-action@v2
-      - name: Set up QEMU user emulation
-        uses: docker/setup-qemu-action@v2
+      # 2. Register QEMU/binfmt so we can chroot into an aarch64 rootfs
+      - name: Register QEMU emulation
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: all
 
-      # 2. Bootstrap Alpine aarch64 via a tested action
+      # 3. Install host prerequisites (binfmt-support + static QEMU binary)
+      - name: Install host deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y binfmt-support qemu-user-static
+
+      # 4. Bootstrap Alpine aarch64 using a well-tested action
       - name: Setup Alpine v3.22 (aarch64)
         uses: jirutka/setup-alpine@v1
         with:
           branch: v3.22
           arch: aarch64
 
-      # 3. Inside Alpine, install kernel+mkinitfs and build the initrd
+      # 5. Inside the Alpine chroot, install kernel+mkinitfs and build the initrd
       - name: Build initrd inside Alpine chroot
+        # alpine.sh is provided by jirutka/setup-alpine and transparently
+        # runs commands under QEMU in the unpacked minirootfs
         shell: alpine.sh {0}
         run: |
           set -eux
-          # Ensure we have a kernel (with modules) and mkinitfs
+
+          # Ensure package index is up-to-date
           apk update
+
+          # Install kernel (with modules) and mkinitfs
           apk add --no-cache \
-            linux-virt      \
-            mkinitfs        \
+            linux-virt \
+            mkinitfs \
             busybox
 
-          # Find the kernel version directory under /lib/modules
+          # Pick the first kernel version directory
           KVER=$(ls /lib/modules | head -n1)
           echo "Generating initrd for kernel $KVER"
-          
-          # Generate a compressed initramfs
+
+          # Generate the compressed initramfs
           mkinitfs \
             -c /etc/mkinitfs/mkinitfs.conf \
-            -k "$KVER"                     \
+            -k "$KVER" \
             -o /tmp/initrd-arm64.gz
 
+          # Show its size
           ls -lh /tmp/initrd-arm64.gz
 
-      # 4. Upload the generated initrd as a GitHub Actions artifact
+      # 6. Upload the resulting initrd as an artifact
       - name: Upload initrd artifact
         uses: actions/upload-artifact@v4
         with:
