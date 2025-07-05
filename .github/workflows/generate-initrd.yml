@@ -27,22 +27,20 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y binfmt-support qemu-user-static
 
-      # 4. Bootstrap Alpine aarch64 using a well-tested action
+      # 4. Bootstrap Alpine aarch64
       - name: Setup Alpine v3.22 (aarch64)
         uses: jirutka/setup-alpine@v1
         with:
           branch: v3.22
           arch: aarch64
 
-      # 5. Inside the Alpine chroot, install kernel+mkinitfs and build the initrd
+      # 5. Inside the Alpine chroot (as root!), install kernel+mkinitfs and build the initrd
       - name: Build initrd inside Alpine chroot
-        # alpine.sh is provided by jirutka/setup-alpine and transparently
-        # runs commands under QEMU in the unpacked minirootfs
-        shell: alpine.sh {0}
+        shell: alpine.sh --root {0}      # <-- run as root inside chroot :contentReference[oaicite:0]{index=0}
         run: |
           set -eux
 
-          # Ensure package index is up-to-date
+          # Update package index
           apk update
 
           # Install kernel (with modules) and mkinitfs
