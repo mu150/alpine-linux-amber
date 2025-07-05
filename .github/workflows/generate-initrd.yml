@@ -32,26 +32,29 @@ jobs:
           sudo cp /etc/resolv.conf rootfs/etc/
           sudo cp /usr/bin/qemu-aarch64-static rootfs/usr/bin/
           for fs in dev proc sys; do 
-            sudo mount --bind /$fs rootfs/$fs || true
+            sudo mount --bind "/$fs" "rootfs/$fs" || { echo "Mount failed: /$fs"; exit 1; }
           done
 
       - name: Build initrd inside chroot
         run: |
           sudo chroot rootfs /bin/sh -eux << 'EOF'
-            # Inside the Alpine chroot:
+            set -x  # Enable debug output
             apk update
-            apk add --no-cache mkinitfs linux-virt
+            apk add --no-cache busybox mkinitfs linux-virt  # Ensure dependencies [[9]](#user-content-9)
 
-            # Ensure kernel modules exist
+            # Verify kernel modules exist
             ls /lib/modules || { echo "No kernel modules found"; exit 1; }
-            KVER=$(ls /lib/modules | head -n1)  # Avoid empty KVER
-            echo "Generating initrd for kernel modules: $KVER"
+            KVER=$(ls /lib/modules | head -n1)  # Avoid empty KVER [[4]](#user-content-4)
+            echo "Generating initrd for kernel: $KVER"
 
-            # Output to the chroot's /initrd-arm64.gz
+            # Explicitly generate initrd to root directory
             mkinitfs \
               -c /etc/mkinitfs/mkinitfs.conf \
               -k "$KVER" \
-              -o /initrd-arm64.gz
+              -o "/initrd-arm64.gz"  # Absolute path ensures correct output [[5]](#user-content-5)
+
+            # Confirm file exists
+            [ -f /initrd-arm64.gz ] && echo "Initrd size: $(du -h /initrd-arm64.gz)"
           EOF
 
       - name: Cleanup mounts
