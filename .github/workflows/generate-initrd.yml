@@ -1,4 +1,4 @@
-name: Generate Alpine ARM64 initrd
+name: Generate Alpine ARM64 initrd+kernel
 
 on:
   workflow_dispatch:
@@ -6,6 +6,25 @@ on:
     branches: [ main ]
 
 jobs:
+  fetch-kernel:
+    runs-on: ubuntu-latest
+    outputs:
+      zimage-path: zimage
+    steps:
+      - run: |
+          set -eux
+          URL=http://dl-cdn.alpinelinux.org/alpine/v3.22/main/aarch64/APKINDEX.tar.gz
+          APKVER=$(wget -qO- "$URL" | gunzip | awk '/^P: linux-virt /{print $2}')
+          wget "http://dl-cdn.alpinelinux.org/alpine/v3.22/main/aarch64/linux-virt-${APKVER}.apk"
+          mkdir kpkg && cd kpkg
+          tar xf ../linux-virt-${APKVER}.apk
+          tar xf data.tar.gz ./boot/vmlinuz-virt
+          mv boot/vmlinuz-virt ../zImage
+      - uses: actions/upload-artifact@v4
+        with:
+          name: zImage
+          path: zImage
+
   generate-initrd:
     runs-on: ubuntu-latest
 
