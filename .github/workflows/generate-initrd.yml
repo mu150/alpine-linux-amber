@@ -6,33 +6,36 @@ on:
     branches: [ main ]
 
 jobs:
-  fetch-kernel:
-    runs-on: ubuntu-latest
-    outputs:
-      zimage-path: zimage
-    steps:
-      - run: |
-          set -eux
-          URL=http://dl-cdn.alpinelinux.org/alpine/v3.22/main/aarch64/APKINDEX.tar.gz
-          APKVER=$(wget -qO- "$URL" | gunzip | awk -F':' '
-            $1 == "P" { found=0 }          # Reset flag for new package
-            {
-               key=$1
-               $0=$0                       # Recompute fields to avoid issues
-               value=substr($0, length(key)+2)
-            }
-            key == "P" && value == "linux-virt" { found=1 }
-            key == "V" && found { print value; exit }
-          ')
-          wget "http://dl-cdn.alpinelinux.org/alpine/v3.22/main/aarch64/linux-virt-${APKVER}.apk"
-          mkdir kpkg && cd kpkg
-          tar xf ../linux-virt-${APKVER}.apk
-          tar xf data.tar.gz ./boot/vmlinuz-virt
-          mv boot/vmlinuz-virt ../zImage
-      - uses: actions/upload-artifact@v4
-        with:
-          name: zImage
-          path: zImage
+fetch-kernel:
+  runs-on: ubuntu-latest
+  outputs:
+    zimage-path: ${{ steps.kernel-step.outputs.zimage-path }}
+  steps:
+    - name: Fetch and extract kernel
+      id: kernel-step
+      run: |
+        set -eux
+        URL=http://dl-cdn.alpinelinux.org/alpine/v3.22/main/aarch64/APKINDEX.tar.gz
+        APKVER=$(wget -qO- "$URL" | gunzip | awk -F':' '
+          $1 == "P" { found=0 }
+          {
+            key=$1
+            $0=$0
+            value=substr($0, length(key)+2)
+          }
+          key == "P" && value == "linux-virt" { found=1 }
+          key == "V" && found { print value; exit }
+        ')
+        wget "http://dl-cdn.alpinelinux.org/alpine/v3.22/main/aarch64/linux-virt-${APKVER}.apk"
+        mkdir kpkg
+        tar xf linux-virt-${APKVER}.apk -C kpkg
+        tar xzf kpkg/data.tar.gz -C kpkg ./boot/vmlinuz-virt
+        mv kpkg/boot/vmlinuz-virt ./zImage
+        echo "zimage-path=zImage" >> $GITHUB_OUTPUT
+    - uses: actions/upload-artifact@v4
+      with:
+        name: zImage
+        path: zImage
 
   generate-initrd:
     runs-on: ubuntu-latest
