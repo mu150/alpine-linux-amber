@@ -16,12 +16,21 @@ jobs:
         id: kernel-step
         run: |
           set -eux
-          URL=https://dl-cdn.alpinelinux.org/alpine/v3.22/main/aarch64/APKINDEX.tar.gz
-          APKVER=$(wget -qO- "$URL" | gunzip | awk -F':' '
-            $1 == "P" { pkg = $2 }
-            $1 == "V" && pkg == "linux-virt" { print $2; exit }
+          URL=http://dl-cdn.alpinelinux.org/alpine/v3.22/main/aarch64/APKINDEX.tar.gz
+          
+          # Robust version extraction using awk
+          APKVER=$(wget -qO- "$URL" | gunzip | awk '
+            /^P:linux-virt$/ { in_package=1; next }
+            in_package && /^V:/ { 
+                gsub(/^V:/, "", $0);
+                print $0;
+                exit
+            }
+            /^P:/ { in_package=0 }  # Reset when new package starts
           ')
-          wget "https://dl-cdn.alpinelinux.org/alpine/v3.22/main/aarch64/linux-virt-${APKVER}.apk"
+          
+          echo "Found linux-virt version: $APKVER"
+          wget "http://dl-cdn.alpinelinux.org/alpine/v3.22/main/aarch64/linux-virt-${APKVER}.apk"
           mkdir kpkg
           tar xf linux-virt-${APKVER}.apk -C kpkg
           tar xzf kpkg/data.tar.gz -C kpkg ./boot/vmlinuz-virt
@@ -59,8 +68,7 @@ jobs:
             alpine:3.22 \
             sh -euxc "
               apk update
-              # Install exact kernel version used in fetch-kernel job
-              apk add --no-cache linux-virt=${{ needs.fetch-kernel.outputs.kernel-version }} mkinitfs
+              apk add --no-cache linux-virt=$KVER mkinitfs
               echo 'Generating initrd for kernel $KVER'
               mkinitfs -k '$KVER'
               cp /boot/initramfs-* /outputs/initrd-arm64.gz
