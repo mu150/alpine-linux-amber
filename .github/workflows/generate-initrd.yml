@@ -32,23 +32,20 @@ jobs:
           echo "Found linux-virt version: $APKVER"
           wget "http://dl-cdn.alpinelinux.org/alpine/v3.22/main/aarch64/linux-virt-${APKVER}.apk"
           
-          # Properly extract APK as tar archive
-          mkdir kpkg
-          tar -xf linux-virt-${APKVER}.apk -C kpkg
-          
-          # Extract kernel image from data.tar.gz
-          tar -xzf kpkg/data.tar.gz -C . ./boot/vmlinuz-virt
+          # Extract kernel image directly from APK without intermediate extraction
+          tar -xOf linux-virt-${APKVER}.apk data.tar.gz | tar -xz -C . ./boot/vmlinuz-virt
           mv boot/vmlinuz-virt ./zImage
           
-          # Extract kernel version from modules directory
-          tar -xzf kpkg/data.tar.gz -C kpkg ./lib/modules
-          KVER=$(ls kpkg/lib/modules)
+          # Get kernel version from modules path
+          KVER=$(tar -tf linux-virt-${APKVER}.apk | 
+                 awk -F/ '/lib\/modules\// {split($0,a,"/"); print a[3]; exit}')
+          
           echo "zimage-path=zImage" >> $GITHUB_OUTPUT
           echo "kernel-version=$KVER" >> $GITHUB_OUTPUT
           echo "Kernel version: $KVER"
           
-          # Clean up temporary files
-          rm -rf kpkg boot
+          # Clean up
+          rm -rf boot
       - uses: actions/upload-artifact@v4
         with:
           name: zImage
