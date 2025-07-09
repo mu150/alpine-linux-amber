@@ -10,6 +10,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       zimage-path: ${{ steps.kernel-step.outputs.zimage-path }}
+      kernel-version: ${{ steps.kernel-step.outputs.kernel-version }}
     steps:
       - name: Fetch and extract kernel
         id: kernel-step
@@ -22,7 +23,12 @@ jobs:
           tar xf linux-virt-${APKVER}.apk -C kpkg
           tar xzf kpkg/data.tar.gz -C kpkg ./boot/vmlinuz-virt
           mv kpkg/boot/vmlinuz-virt ./zImage
+          
+          # Extract kernel version from modules directory
+          KVER=$(ls kpkg/lib/modules)
           echo "zimage-path=zImage" >> $GITHUB_OUTPUT
+          echo "kernel-version=$KVER" >> $GITHUB_OUTPUT
+          echo "Kernel version: $KVER"
       - uses: actions/upload-artifact@v4
         with:
           name: zImage
@@ -30,6 +36,7 @@ jobs:
 
   generate-initrd:
     runs-on: ubuntu-latest
+    needs: fetch-kernel
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -41,18 +48,21 @@ jobs:
       
       - name: Build initrd via Docker+QEMU
         run: |
+          KVER="${{ needs.fetch-kernel.outputs.kernel-version }}"
+          echo "Using kernel version: $KVER"
+          
           docker run --rm --privileged --platform linux/arm64 \
             -v "${{ github.workspace }}:/outputs" \
             alpine:3.22 \
-            sh -euxc '
+            sh -euxc "
               apk update
-              apk add --no-cache linux-virt mkinitfs busybox
-              KVER=$(ls /lib/modules)
-              echo "Generating initrd for kernel $KVER"
-              mkinitfs -k "$KVER"
+              # Install exact kernel version used in fetch-kernel job
+              apk add --no-cache linux-virt=${{ needs.fetch-kernel.outputs.kernel-version }} mkinitfs
+              echo 'Generating initrd for kernel $KVER'
+              mkinitfs -k '$KVER'
               cp /boot/initramfs-* /outputs/initrd-arm64.gz
               ls -lh /outputs/initrd-arm64.gz
-            '
+            "
       - name: Fix initrd permissions
         run: sudo chmod a+r initrd-arm64.gz
       
