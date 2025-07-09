@@ -14,7 +14,16 @@ jobs:
       - run: |
           set -eux
           URL=http://dl-cdn.alpinelinux.org/alpine/v3.22/main/aarch64/APKINDEX.tar.gz
-          APKVER=$(wget -qO- "$URL" | gunzip | awk '/^P: linux-virt /{print $2}')
+          APKVER=$(wget -qO- "$URL" | gunzip | awk -F':' '
+            $1 == "P" { found=0 }          # Reset flag for new package
+            {
+               key=$1
+               $0=$0                       # Recompute fields to avoid issues
+               value=substr($0, length(key)+2)
+            }
+            key == "P" && value == "linux-virt" { found=1 }
+            key == "V" && found { print value; exit }
+          ')
           wget "http://dl-cdn.alpinelinux.org/alpine/v3.22/main/aarch64/linux-virt-${APKVER}.apk"
           mkdir kpkg && cd kpkg
           tar xf ../linux-virt-${APKVER}.apk
