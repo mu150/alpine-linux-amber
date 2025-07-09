@@ -31,13 +31,17 @@ jobs:
           
           echo "Found linux-virt version: $APKVER"
           wget "http://dl-cdn.alpinelinux.org/alpine/v3.22/main/aarch64/linux-virt-${APKVER}.apk"
+          
+          # Properly extract APK as ar archive
           mkdir kpkg
-          tar xf linux-virt-${APKVER}.apk -C kpkg
-          tar xzf kpkg/data.tar.gz -C kpkg ./boot/vmlinuz-virt
-          mv kpkg/boot/vmlinuz-virt ./zImage
+          ar x linux-virt-${APKVER}.apk --output kpkg
+          
+          # Extract kernel image from data.tar.gz
+          tar xzf kpkg/data.tar.gz -C . ./boot/vmlinuz-virt
+          mv boot/vmlinuz-virt ./zImage
           
           # Extract kernel version from modules directory
-          KVER=$(ls kpkg/lib/modules)
+          KVER=$(tar -ztf kpkg/data.tar.gz | awk -F/ '$2 == "lib" && $3 == "modules" {print $4; exit}')
           echo "zimage-path=zImage" >> $GITHUB_OUTPUT
           echo "kernel-version=$KVER" >> $GITHUB_OUTPUT
           echo "Kernel version: $KVER"
