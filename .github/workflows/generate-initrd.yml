@@ -16,9 +16,12 @@ jobs:
         id: kernel-step
         run: |
           set -eux
-          URL=http://dl-cdn.alpinelinux.org/alpine/v3.22/main/aarch64/APKINDEX.tar.gz
-          APKVER=$(wget -qO- "$URL" | gunzip | grep -A1 '^P:linux-virt$' | grep '^V:' | cut -d: -f2-)
-          wget "http://dl-cdn.alpinelinux.org/alpine/v3.22/main/aarch64/linux-virt-${APKVER}.apk"
+          URL=https://dl-cdn.alpinelinux.org/alpine/v3.22/main/aarch64/APKINDEX.tar.gz
+          APKVER=$(wget -qO- "$URL" | gunzip | awk -F':' '
+            $1 == "P" { pkg = $2 }
+            $1 == "V" && pkg == "linux-virt" { print $2; exit }
+          ')
+          wget "https://dl-cdn.alpinelinux.org/alpine/v3.22/main/aarch64/linux-virt-${APKVER}.apk"
           mkdir kpkg
           tar xf linux-virt-${APKVER}.apk -C kpkg
           tar xzf kpkg/data.tar.gz -C kpkg ./boot/vmlinuz-virt
