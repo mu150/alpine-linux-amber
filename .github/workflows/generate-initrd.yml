@@ -12,14 +12,6 @@ jobs:
       zimage-path: ${{ steps.kernel-step.outputs.zimage-path }}
       kernel-version: ${{ steps.kernel-step.outputs.kernel-version }}
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        
-      - name: Set up QEMU for ARM64
-        uses: docker/setup-qemu-action@v3
-        with:
-          platforms: arm64
-      
       - name: Fetch and extract kernel
         id: kernel-step
         run: |
@@ -40,31 +32,14 @@ jobs:
           echo "Found linux-virt version: $APKVER"
           wget "http://dl-cdn.alpinelinux.org/alpine/v3.22/main/aarch64/linux-virt-${APKVER}.apk"
           
-          # Use multi-architecture approach to extract files
-          docker run --rm --platform linux/arm64 \
-            -v $PWD:/data \
-            alpine:3.22 \
-            sh -c "
-              apk add --no-cache apk-tools >/dev/null
-              mkdir /tmp/kpkg
-              cd /tmp/kpkg
-              tar -xzf /data/linux-virt-${APKVER}.apk
-              for f in *.tar.*; do
-                tar -xf \$f -C /data ./boot/vmlinuz-virt ./lib/modules
-              done
-            "
+          # Extract kernel image directly from APK
+          tar -xOf linux-virt-${APKVER}.apk $(tar -tf linux-virt-${APKVER}.apk | grep 'boot/vmlinuz-virt$') > zImage
           
-          # Move kernel image
-          mv boot/vmlinuz-virt ./zImage
-          
-          # Get kernel version
-          KVER=$(ls lib/modules)
+          # Get kernel version from APK
+          KVER=$(tar -tf linux-virt-${APKVER}.apk | awk -F/ '/lib\/modules\// {print $3}' | head -1)
           echo "zimage-path=zImage" >> $GITHUB_OUTPUT
           echo "kernel-version=$KVER" >> $GITHUB_OUTPUT
           echo "Kernel version: $KVER"
-          
-          # Clean up
-          rm -rf boot lib
       - uses: actions/upload-artifact@v4
         with:
           name: zImage
