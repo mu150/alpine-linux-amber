@@ -47,10 +47,17 @@ jobs:
           echo "kernel-release=$KREL" >> $GITHUB_OUTPUT
           echo "Package version: $PKGVER"
           echo "Kernel release: $KREL"
+          
+          # Save APK for initrd job
+          cp linux-virt-${PKGVER}.apk kernel-package.apk
       - uses: actions/upload-artifact@v4
         with:
           name: zImage
           path: zImage
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kernel-package
+          path: kernel-package.apk
 
   generate-initrd:
     runs-on: ubuntu-latest
@@ -64,6 +71,12 @@ jobs:
         with:
           platforms: arm64
       
+      - name: Download kernel package
+        uses: actions/download-artifact@v4
+        with:
+          name: kernel-package
+          path: .
+      
       - name: Build initrd via Docker+QEMU
         run: |
           PKGVER="${{ needs.fetch-kernel.outputs.kernel-package-version }}"
@@ -76,8 +89,9 @@ jobs:
             alpine:3.22 \
             sh -euxc "
               apk update
-              # Install exact kernel package version including release
-              apk add --no-cache linux-virt-$PKGVER mkinitfs
+              # Install kernel package from local file
+              apk add --no-cache --allow-untrusted /outputs/kernel-package.apk
+              apk add --no-cache mkinitfs
               echo 'Generating initrd for kernel $KREL'
               mkinitfs -k '$KREL'
               cp /boot/initramfs-* /outputs/initrd-arm64.gz
