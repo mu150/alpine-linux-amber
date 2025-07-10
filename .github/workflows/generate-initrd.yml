@@ -10,7 +10,8 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       zimage-path: ${{ steps.kernel-step.outputs.zimage-path }}
-      kernel-version: ${{ steps.kernel-step.outputs.kernel-version }}
+      kernel-package-version: ${{ steps.kernel-step.outputs.kernel-package-version }}
+      kernel-release: ${{ steps.kernel-step.outputs.kernel-release }}
     steps:
       - name: Fetch and extract kernel
         id: kernel-step
@@ -19,36 +20,33 @@ jobs:
           URL=http://dl-cdn.alpinelinux.org/alpine/v3.22/main/aarch64/APKINDEX.tar.gz
           
           # Robust version extraction using awk
-          APKVER=$(wget -qO- "$URL" | gunzip | awk '
+          PKGVER=$(wget -qO- "$URL" | gunzip | awk '
             /^P:linux-virt$/ { in_package=1; next }
             in_package && /^V:/ { 
                 gsub(/^V:/, "", $0);
                 print $0;
                 exit
             }
-            /^P:/ { in_package=0 }  # Reset when new package starts
+            /^P:/ { in_package=0 }
           ')
           
-          echo "Found linux-virt version: $APKVER"
-          wget "http://dl-cdn.alpinelinux.org/alpine/v3.22/main/aarch64/linux-virt-${APKVER}.apk"
+          echo "Found linux-virt version: $PKGVER"
+          wget "http://dl-cdn.alpinelinux.org/alpine/v3.22/main/aarch64/linux-virt-${PKGVER}.apk"
           
           # Extract kernel image directly from APK
-          KERNEL_PATH=$(tar -tf linux-virt-${APKVER}.apk | grep 'boot/vmlinuz-virt$')
-          tar -xOf linux-virt-${APKVER}.apk "$KERNEL_PATH" > zImage
+          KERNEL_PATH=$(tar -tf linux-virt-${PKGVER}.apk | grep 'boot/vmlinuz-virt$')
+          tar -xOf linux-virt-${PKGVER}.apk "$KERNEL_PATH" > zImage
           
-          # Get kernel version from APK contents
-          KVER=$(tar -tf linux-virt-${APKVER}.apk | 
+          # Get kernel release (uname -r format)
+          KREL=$(tar -tf linux-virt-${PKGVER}.apk | 
                  awk -F/ '/lib\/modules\// {print $3; exit}' | 
                  tr -d '\r' | xargs)
           
-          # Fallback to extracting from kernel filename
-          if [ -z "$KVER" ]; then
-            KVER=$(echo "$APKVER" | sed 's/^[^0-9]*//;s/-.*//')
-          fi
-          
           echo "zimage-path=zImage" >> $GITHUB_OUTPUT
-          echo "kernel-version=$KVER" >> $GITHUB_OUTPUT
-          echo "Kernel version: $KVER"
+          echo "kernel-package-version=$PKGVER" >> $GITHUB_OUTPUT
+          echo "kernel-release=$KREL" >> $GITHUB_OUTPUT
+          echo "Package version: $PKGVER"
+          echo "Kernel release: $KREL"
       - uses: actions/upload-artifact@v4
         with:
           name: zImage
@@ -68,17 +66,20 @@ jobs:
       
       - name: Build initrd via Docker+QEMU
         run: |
-          KVER="${{ needs.fetch-kernel.outputs.kernel-version }}"
-          echo "Using kernel version: $KVER"
+          PKGVER="${{ needs.fetch-kernel.outputs.kernel-package-version }}"
+          KREL="${{ needs.fetch-kernel.outputs.kernel-release }}"
+          echo "Using package version: $PKGVER"
+          echo "Using kernel release: $KREL"
           
           docker run --rm --platform linux/arm64 \
             -v "$PWD:/outputs" \
             alpine:3.22 \
             sh -euxc "
               apk update
-              apk add --no-cache linux-virt=$KVER mkinitfs
-              echo 'Generating initrd for kernel $KVER'
-              mkinitfs -k '$KVER'
+              # Install exact kernel package version including release
+              apk add --no-cache linux-virt-$PKGVER mkinitfs
+              echo 'Generating initrd for kernel $KREL'
+              mkinitfs -k '$KREL'
               cp /boot/initramfs-* /outputs/initrd-arm64.gz
               ls -lh /outputs/initrd-arm64.gz
             "
