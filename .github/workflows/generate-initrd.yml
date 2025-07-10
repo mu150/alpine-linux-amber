@@ -33,10 +33,19 @@ jobs:
           wget "http://dl-cdn.alpinelinux.org/alpine/v3.22/main/aarch64/linux-virt-${APKVER}.apk"
           
           # Extract kernel image directly from APK
-          tar -xOf linux-virt-${APKVER}.apk $(tar -tf linux-virt-${APKVER}.apk | grep 'boot/vmlinuz-virt$') > zImage
+          KERNEL_PATH=$(tar -tf linux-virt-${APKVER}.apk | grep 'boot/vmlinuz-virt$')
+          tar -xOf linux-virt-${APKVER}.apk "$KERNEL_PATH" > zImage
           
-          # Get kernel version from APK
-          KVER=$(tar -tf linux-virt-${APKVER}.apk | awk -F/ '/lib\/modules\// {print $3}' | head -1)
+          # Get kernel version from APK contents
+          KVER=$(tar -tf linux-virt-${APKVER}.apk | 
+                 awk -F/ '/lib\/modules\// {print $3; exit}' | 
+                 tr -d '\r' | xargs)
+          
+          # Fallback to extracting from kernel filename
+          if [ -z "$KVER" ]; then
+            KVER=$(echo "$APKVER" | sed 's/^[^0-9]*//;s/-.*//')
+          fi
+          
           echo "zimage-path=zImage" >> $GITHUB_OUTPUT
           echo "kernel-version=$KVER" >> $GITHUB_OUTPUT
           echo "Kernel version: $KVER"
