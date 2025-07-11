@@ -38,9 +38,15 @@ jobs:
           tar -xOf linux-virt-${PKGVER}.apk "$KERNEL_PATH" > zImage
           
           # Get kernel release (uname -r format)
+          # Robust method: extract first modules directory name
           KREL=$(tar -tf linux-virt-${PKGVER}.apk | 
-                 awk -F/ '/lib\/modules\// {print $3; exit}' | 
+                 awk -F/ '/lib\/modules\// && !/\/$/ {print $3; exit}' | 
                  tr -d '\r' | xargs)
+          
+          # Fallback if still empty
+          if [ -z "$KREL" ]; then
+            KREL=$(echo "$PKGVER" | sed 's/^[^0-9]*//;s/-.*//')-0-virt
+          fi
           
           echo "zimage-path=zImage" >> $GITHUB_OUTPUT
           echo "kernel-package-version=$PKGVER" >> $GITHUB_OUTPUT
@@ -92,6 +98,11 @@ jobs:
               # Install kernel package from local file
               apk add --no-cache --allow-untrusted /outputs/kernel-package.apk
               apk add --no-cache mkinitfs
+              
+              # Verify kernel release
+              echo 'Installed kernel modules:'
+              ls /lib/modules
+              
               echo 'Generating initrd for kernel $KREL'
               mkinitfs -k '$KREL'
               cp /boot/initramfs-* /outputs/initrd-arm64.gz
